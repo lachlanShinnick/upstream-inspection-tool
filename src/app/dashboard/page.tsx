@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ClipboardList, FileSignature, LogOut, Plus, UserRound } from "lucide-react";
+import { ClipboardList, FileSignature, LogOut, UserRound } from "lucide-react";
 import { auth, signOut } from "@/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink, PrimaryButton } from "@/app/ui";
@@ -58,19 +58,19 @@ export default async function DashboardPage() {
     >
       <div className="grid gap-4 lg:grid-cols-[1.45fr_1fr]">
         <Card className="overflow-hidden p-0">
-          <div className="border-b border-black/[.06] bg-[#111817] px-5 py-5 text-white sm:px-6">
+          <div className="border-b border-black/[.06] bg-[#eef7fc] px-5 py-5 text-[#111817] sm:px-6 dark:border-white/[.12] dark:bg-zinc-900 dark:text-zinc-50">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0072c6] dark:text-sky-300">
                   Field workflow
                 </p>
                 <h2 className="mt-3 text-2xl font-semibold tracking-normal">
                   Council Routine Inspection
                 </h2>
               </div>
-              <ClipboardList className="h-8 w-8 text-white/70" aria-hidden="true" />
+              <ClipboardList className="h-8 w-8 text-[#0072c6]" aria-hidden="true" />
             </div>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-white/72">
+            <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
               Pick a property, create the dated OneDrive folder, capture report
               items, then generate the branded document for review.
             </p>
@@ -78,8 +78,7 @@ export default async function DashboardPage() {
           <div className="p-5 sm:p-6">
             <Link href="/inspect/new">
               <PrimaryButton className="w-full sm:w-auto">
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                New inspection
+                + New Council Inspection
               </PrimaryButton>
             </Link>
           </div>
@@ -87,7 +86,7 @@ export default async function DashboardPage() {
 
         <Card>
           <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#e8f5ef] text-[#1f7a5a] dark:bg-emerald-400/10 dark:text-emerald-300">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#eef7fc] text-[#0072c6] dark:bg-sky-400/10 dark:text-sky-300">
               <FileSignature className="h-5 w-5" aria-hidden="true" />
             </div>
             <div className="min-w-0">

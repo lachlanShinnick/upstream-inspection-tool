@@ -28,8 +28,8 @@ export default async function LoginPage({
       <div className="mx-auto grid w-full max-w-5xl overflow-hidden rounded-lg border border-black/[.08] bg-white shadow-xl shadow-black/[.06] lg:grid-cols-[0.95fr_1.05fr] dark:border-white/[.12] dark:bg-zinc-950">
         <section className="p-6 sm:p-8 lg:p-10">
           <div className="flex items-center gap-3">
-            <BrandMark />
-            <div>
+            <BrandMark size="lg" />
+            <div className="sr-only">
               <p className="text-sm font-semibold text-[#111817] dark:text-zinc-50">
                 Upstream Property
               </p>
@@ -40,7 +40,7 @@ export default async function LoginPage({
           </div>
 
           <div className="mt-12">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#1f7a5a] dark:text-emerald-400">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0072c6] dark:text-sky-300">
               Staff login
             </p>
             <h1 className="mt-3 text-3xl font-semibold tracking-normal text-[#111817] dark:text-zinc-50">
@@ -78,19 +78,23 @@ export default async function LoginPage({
           </form>
         </section>
 
-        <section className="hidden bg-[#111817] p-8 text-white lg:block">
+        <section className="hidden border-l border-black/[.08] bg-[#eef7fc] p-8 text-[#18211f] lg:block dark:border-white/[.12] dark:bg-zinc-900 dark:text-zinc-50">
           <div className="flex h-full flex-col justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0072c6] dark:text-sky-300">
                 Mobile-first field capture
               </p>
-              <div className="mt-6 rounded-lg border border-white/12 bg-white/[.06] p-5 shadow-2xl shadow-black/20">
+              <div className="mt-6 rounded-lg border border-black/[.08] bg-white p-5 shadow-lg shadow-[#0072c6]/10 dark:border-white/[.12] dark:bg-zinc-950">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm font-semibold">14 Brougham Street</p>
-                    <p className="mt-1 text-xs text-white/58">Council inspection</p>
+                    <p className="text-sm font-semibold text-[#111817] dark:text-zinc-50">
+                      14 Brougham Street
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Council inspection
+                    </p>
                   </div>
-                  <span className="rounded-md bg-emerald-400/14 px-2.5 py-1 text-xs font-semibold text-emerald-200">
+                  <span className="rounded-md bg-[#e6f3fb] px-2.5 py-1 text-xs font-semibold text-[#005ea2] dark:bg-sky-400/10 dark:text-sky-300">
                     Draft
                   </span>
                 </div>
@@ -103,16 +107,18 @@ export default async function LoginPage({
                   {["Front entry", "Kitchen", "Boundary fence"].map((area) => (
                     <div
                       key={area}
-                      className="flex items-center justify-between rounded-md bg-black/20 px-3 py-2"
+                      className="flex items-center justify-between rounded-md bg-[#f6f7f5] px-3 py-2 dark:bg-white/[.06]"
                     >
-                      <span className="text-sm text-white/82">{area}</span>
-                      <span className="h-2 w-2 rounded-full bg-emerald-300" />
+                      <span className="text-sm text-zinc-700 dark:text-zinc-200">
+                        {area}
+                      </span>
+                      <span className="h-2 w-2 rounded-full bg-[#0072c6]" />
                     </div>
                   ))}
                 </div>
               </div>
             </div>
-            <p className="mt-8 max-w-sm text-sm leading-6 text-white/58">
+            <p className="mt-8 max-w-sm text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               Built for fast site walks, clear internal review, and consistent
               council-facing documents.
             </p>
@@ -133,10 +139,12 @@ function PreviewMetric({
   value: string;
 }) {
   return (
-    <div className="rounded-md bg-white/[.08] p-3">
-      <div className="text-white/58 [&>svg]:h-4 [&>svg]:w-4">{icon}</div>
-      <p className="mt-3 text-lg font-semibold">{value}</p>
-      <p className="mt-0.5 text-xs text-white/52">{label}</p>
+    <div className="rounded-md bg-[#eef7fc] p-3 dark:bg-white/[.06]">
+      <div className="text-[#0072c6] [&>svg]:h-4 [&>svg]:w-4">{icon}</div>
+      <p className="mt-3 text-lg font-semibold text-[#111817] dark:text-zinc-50">
+        {value}
+      </p>
+      <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{label}</p>
     </div>
   );
 }

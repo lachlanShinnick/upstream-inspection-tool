@@ -32,7 +32,7 @@ export function PropertyPicker({ properties }: { properties: GraphFolder[] }) {
   }
 
   return (
-    <div className="max-w-3xl">
+    <div className="w-full">
       <div className="relative">
         <Search
           className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-400"
@@ -75,13 +75,10 @@ export function PropertyPicker({ properties }: { properties: GraphFolder[] }) {
                     <span className="block truncate text-base font-semibold text-[#111817] dark:text-zinc-50">
                       {p.name}
                     </span>
-                    <span className="mt-0.5 block text-sm text-zinc-500 dark:text-zinc-400">
-                      SharePoint property folder
-                    </span>
                   </span>
                 </span>
-                <span className="inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-[#0072c6]">
-                  {busy ? "Creating..." : "Start"}
+                <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold text-[#0072c6]">
+                  {busy ? "Creating..." : "Submit inspection"}
                   {!busy && (
                     <ArrowRight
                       className="h-4 w-4 transition-transform group-hover:translate-x-0.5"

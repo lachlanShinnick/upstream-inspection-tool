@@ -30,6 +30,7 @@ export default async function NewInspectionPage() {
 
   return (
     <AppShell
+      align="center"
       eyebrow="New inspection"
       title="Select a property"
       subtitle="Choose the property folder for this council routine inspection. The app will create the dated OneDrive inspection folder automatically."
@@ -40,16 +41,18 @@ export default async function NewInspectionPage() {
         </NavLink>
       }
     >
-      {loadError ? (
-        <p
-          role="alert"
-          className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
-        >
-          {loadError}
-        </p>
-      ) : (
-        <PropertyPicker properties={properties} />
-      )}
+      <div className="mx-auto w-full max-w-3xl text-left">
+        {loadError ? (
+          <p
+            role="alert"
+            className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
+          >
+            {loadError}
+          </p>
+        ) : (
+          <PropertyPicker properties={properties} />
+        )}
+      </div>
     </AppShell>
   );
 }
