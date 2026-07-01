@@ -5,6 +5,7 @@ import ImageModule from "docxtemplater-image-module-free";
 import PizZip from "pizzip";
 import sharp from "sharp";
 import { auth } from "@/auth";
+import { polishComment } from "@/lib/commentPolish";
 import { downloadDriveItem, uploadFileToFolder } from "@/lib/graph";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -14,8 +15,16 @@ const TEMPLATE_PATH = path.join(
 );
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+// Display size (px) of each photo in the Word report. The photo cell in the
+// template is ~99px wide and exactly 1720 twips (~114px) tall (hRule="exact"),
+// so height is sized close to the cell to fill it — portrait photos in
+// particular were previously letterboxed into a short 76px box and looked small.
 const REPORT_PHOTO_WIDTH = 101;
-const REPORT_PHOTO_HEIGHT = 76;
+const REPORT_PHOTO_HEIGHT = 108;
+// The raster is generated at this multiple of the display size so Word has
+// enough real pixels to render/print the photo sharply instead of upscaling a
+// display-sized thumbnail.
+const REPORT_PHOTO_SCALE = 3;
 const SIGNATURE_MAX_WIDTH = 180;
 const SIGNATURE_MAX_HEIGHT = 45;
 const INSPECTOR_COMPANY = "Upstream Property Solutions";
@@ -36,6 +45,18 @@ function formatDateAU(iso: string): string {
   return `${Number(d)}/${m}/${y}`;
 }
 
+/**
+ * Comment shown in the report. When OpenAI returned a polished version, show the
+ * inspector's original followed by the AI suggestion, separated by a blank line,
+ * so the reviewer can pick whichever reads best and delete the other.
+ * (linebreaks: true on Docxtemplater turns these "\n"s into real line breaks.)
+ */
+function buildComment(original: string, polished: string | null): string {
+  const base = original.trim();
+  if (!polished) return base;
+  return `${base}\n\nSuggested revision:\n${polished}`;
+}
+
 /** Read intrinsic dimensions from a PNG header (signature image). */
 function pngSize(buf: Buffer): { width: number; height: number } {
   if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47) {
@@ -47,18 +68,20 @@ function pngSize(buf: Buffer): { width: number; height: number } {
 /**
  * Normalize every report photo into the exact same Word image box. This keeps
  * the surrounding Word table height/width stable for both landscape and portrait
- * source photos while preserving the photo aspect ratio inside the box.
+ * source photos while preserving the photo aspect ratio inside the box. The
+ * raster is rendered at REPORT_PHOTO_SCALE× the display size so the photo stays
+ * sharp on screen and in print; the on-page size is fixed separately in getSize.
  */
 async function fitReportPhotoBox(buf: Buffer): Promise<Buffer> {
   return sharp(buf)
     .rotate()
     .resize({
-      width: REPORT_PHOTO_WIDTH,
-      height: REPORT_PHOTO_HEIGHT,
+      width: REPORT_PHOTO_WIDTH * REPORT_PHOTO_SCALE,
+      height: REPORT_PHOTO_HEIGHT * REPORT_PHOTO_SCALE,
       fit: "contain",
       background: { r: 255, g: 255, b: 255, alpha: 1 },
     })
-    .png()
+    .png({ compressionLevel: 9 })
     .toBuffer();
 }
 
@@ -192,7 +215,16 @@ export async function generateReport(
   }
   const signatureBytes = Buffer.from(await sigBlob.arrayBuffer());
 
-  // 5. Template data + a value->size map the image module reads in getSize.
+  // 5. Polish each comment with OpenAI in parallel. Failures fall back to the
+  // original (polishComment returns null), so this never blocks generation.
+  const polishedByItem = new Map<string, string | null>();
+  await Promise.all(
+    items.map(async (item) => {
+      polishedByItem.set(item.id, await polishComment(item.comment ?? ""));
+    }),
+  );
+
+  // 6. Template data + a value->size map the image module reads in getSize.
   const sizeByValue = new Map<unknown, { width: number; height: number }>();
 
   let nextPhotoNumber = 1;
@@ -202,7 +234,7 @@ export async function generateReport(
     return {
       number: i + 1,
       area: item.area,
-      comment: item.comment ?? "",
+      comment: buildComment(item.comment ?? "", polishedByItem.get(item.id) ?? null),
       image_refs: photoNumbers.join(", "),
       photos: itemPhotos.map((p, j) => {
         const reportImage = reportImageByFileId.get(p.onedrive_file_id)!;
@@ -241,7 +273,7 @@ export async function generateReport(
     signature: signatureBytes,
   };
 
-  // 6. Render the template.
+  // 7. Render the template.
   const imageModule = new ImageModule({
     centered: false,
     getImage: (tagValue) => tagValue as Buffer,
@@ -295,7 +327,7 @@ export async function generateReport(
     compression: "DEFLATE",
   }) as Buffer;
 
-  // 7. Upload the .docx into the inspection's dated subfolder.
+  // 8. Upload the .docx into the inspection's dated subfolder.
   const safeProperty = inspection.property_name.replace(/[\\/:*?"<>|]/g, "-");
   const generatedAt = new Date()
     .toISOString()
@@ -310,7 +342,7 @@ export async function generateReport(
     DOCX_MIME,
   );
 
-  // 8. Mark generated.
+  // 9. Mark generated.
   const { error: updateErr } = await sb
     .from("inspections")
     .update({ status: "generated", generated_doc_onedrive_id: uploaded.id })

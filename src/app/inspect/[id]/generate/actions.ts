@@ -24,16 +24,14 @@ export async function runGenerate(
 }
 
 /**
- * Create an Outlook draft to Dave with the generated report attached, and
- * return its webLink so the inspector can review and send manually.
+ * Email Dave (the configured reviewer) that the generated report is ready, and
+ * save a copy to the sender's Sent Items.
  */
 export async function sendForReview(
   inspectionId: string,
-): Promise<{ webLink: string }> {
+): Promise<{ sent: true }> {
   const session = await auth();
   if (!session) throw new Error("Not signed in.");
-
-  // Comma- (or semicolon-) separated list of recipients.
   const recipients = (process.env.REVIEW_RECIPIENT_EMAIL ?? "")
     .split(/[,;]/)
     .map((r) => r.trim())
@@ -49,6 +47,7 @@ export async function sendForReview(
     .select(
       "property_name, inspection_date, onedrive_drive_id, generated_doc_onedrive_id",
     )
+
     .eq("id", inspectionId)
     .single();
   if (error || !inspection) throw new Error("Inspection not found.");
@@ -56,35 +55,24 @@ export async function sendForReview(
     throw new Error("Generate the report before sending it for review.");
   }
 
-  const docBytes = await downloadDriveItem(
-    inspection.onedrive_drive_id,
-    inspection.generated_doc_onedrive_id,
-  );
-
   const dateAU = formatDateAU(inspection.inspection_date);
-  const subject = `Council Inspection Report — ${inspection.property_name} — ${dateAU}`;
-  const filename = `Council Inspection Report - ${inspection.property_name.replace(
-    /[\\/:*?"<>|]/g,
-    "-",
-  )} - ${inspection.inspection_date}.docx`;
-
+  const subject = `Council Inspection Report Ready — ${inspection.property_name} — ${dateAU}`;
   const client = await getGraphClient();
-  const draft = await client.api("/me/messages").post({
-    subject,
-    toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
-    body: {
-      contentType: "Text",
-      content: `Hi,\n\nPlease find attached the council routine inspection report for ${inspection.property_name} (${dateAU}) for review.\n\nThanks`,
-    },
-    attachments: [
-      {
-        "@odata.type": "#microsoft.graph.fileAttachment",
-        name: filename,
-        contentType: DOCX_MIME,
-        contentBytes: docBytes.toString("base64"),
-      },
-    ],
-  });
+  await client.api("/me/sendMail").post({
+    message: {
+      subject,
+      toRecipients: recipients.map((address) => ({
+        emailAddress: { address },
+      })),
 
-  return { webLink: draft.webLink as string };
+      body: {
+        contentType: "Text",
+        content: `Hi,
+The council routine inspection report for ${inspection.property_name} (${dateAU}) has been generated and uploaded to the inspection folder in OneDrive.
+Thanks`,
+      },
+    },
+    saveToSentItems: true,
+  });
+  return { sent: true };
 }

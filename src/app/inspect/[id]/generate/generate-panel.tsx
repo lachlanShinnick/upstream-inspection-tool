@@ -41,11 +41,10 @@ export function GeneratePanel({
     setSentNote(null);
     startSend(async () => {
       try {
-        const { webLink } = await sendForReview(inspectionId);
-        window.open(webLink, "_blank", "noopener,noreferrer");
-        setSentNote("Draft created in Outlook — review and hit Send there.");
+        await sendForReview(inspectionId);
+        setSentNote("Report emailed to Dave for review.");
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Couldn’t create the draft.");
+        setError(e instanceof Error ? e.message : "Couldn’t send the report.");
       }
     });
   }
@@ -124,7 +123,7 @@ export function GeneratePanel({
               className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#0072c6] px-5 text-sm font-semibold text-white shadow-sm shadow-[#0072c6]/20 transition-colors hover:bg-[#005ea2] disabled:opacity-60"
             >
               <Send className="h-4 w-4" aria-hidden="true" />
-              {sending ? "Creating draft…" : "Send to Dave for review"}
+              {sending ? "Sending…" : "Send to Dave for review"}
             </button>
             {!recipientConfigured && (
               <p className="mt-3 flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
