@@ -23,9 +23,23 @@ export async function getGraphClient(): Promise<Client> {
 }
 
 /**
+ * The Graph access token from the current session. `auth()` runs the jwt
+ * callback, which refreshes the token if it's expired — so callers always get a
+ * usable token transparently.
+ */
+async function getAccessToken(): Promise<string> {
+  const session = await auth();
+  const accessToken = session?.accessToken;
+  if (!accessToken) {
+    throw new Error("No Microsoft Graph access token on the session.");
+  }
+  return accessToken;
+}
+
+/**
  * Upload a small (<4MB) file into a folder via a simple Graph PUT, using the
  * session access token directly. Raw fetch is the most reliable path for binary
- * bodies. Returns the created drive item's id and name.
+ * bodies. Returns the created drive item's id, name and webUrl.
  */
 export async function uploadFileToFolder(
   driveId: string,
@@ -33,12 +47,8 @@ export async function uploadFileToFolder(
   filename: string,
   body: Buffer | Uint8Array,
   contentType = "application/octet-stream",
-): Promise<{ id: string; name: string }> {
-  const session = await auth();
-  const accessToken = session?.accessToken;
-  if (!accessToken) {
-    throw new Error("No Microsoft Graph access token on the session.");
-  }
+): Promise<{ id: string; name: string; webUrl: string }> {
+  const accessToken = await getAccessToken();
 
   const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/${encodeURIComponent(
     filename,
@@ -53,11 +63,62 @@ export async function uploadFileToFolder(
   });
   const data = await res.json();
   if (!res.ok) {
+    const msg = data?.error?.message ?? `OneDrive upload failed (${res.status}).`;
+    if (res.status === 423 || /lock/i.test(msg)) {
+      throw new Error(
+        "The report file is open right now (in Word or OneDrive), so it can’t be overwritten. Close it everywhere, then regenerate.",
+      );
+    }
+    throw new Error(msg);
+  }
+  return {
+    id: data.id as string,
+    name: data.name as string,
+    webUrl: data.webUrl as string,
+  };
+}
+
+/** Download a drive item's raw bytes (GET /content). */
+export async function downloadDriveItem(
+  driveId: string,
+  fileId: string,
+): Promise<Buffer> {
+  const accessToken = await getAccessToken();
+  const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${fileId}/content`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = (await res.json())?.error?.message ?? "";
+    } catch {
+      /* binary/empty body */
+    }
     throw new Error(
-      data?.error?.message ?? `OneDrive upload failed (${res.status}).`,
+      `Download failed (${res.status})${detail ? `: ${detail}` : ""}.`,
     );
   }
-  return { id: data.id as string, name: data.name as string };
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/** The OneDrive web URL for a drive item, or null if it can't be fetched. */
+export async function getDriveItemWebUrl(
+  driveId: string,
+  fileId: string,
+): Promise<string | null> {
+  try {
+    const accessToken = await getAccessToken();
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${fileId}?$select=webUrl`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.webUrl as string) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** List the immediate subfolders of a folder (folders only, up to 200). */

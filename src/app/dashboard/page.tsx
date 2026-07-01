@@ -1,9 +1,22 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ClipboardList, FileSignature, LogOut, UserRound } from "lucide-react";
+import {
+  ClipboardList,
+  Download,
+  FileSignature,
+  FileText,
+  LogOut,
+  UserRound,
+} from "lucide-react";
 import { auth, signOut } from "@/auth";
+import { getDriveItemWebUrl } from "@/lib/graph";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink, PrimaryButton } from "@/app/ui";
+
+function formatDateAU(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${Number(d)}/${m}/${y}`;
+}
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -12,6 +25,7 @@ export default async function DashboardPage() {
   // Read the row back from Supabase keyed on m365_oid. If this returns the
   // user, the sign-in upsert worked end to end.
   let storedUser: {
+    id: string;
     name: string | null;
     email: string | null;
     m365_oid: string;
@@ -20,13 +34,47 @@ export default async function DashboardPage() {
   if (session.user?.oid) {
     const { data } = await supabaseAdmin()
       .from("users")
-      .select("name, email, m365_oid")
+      .select("id, name, email, m365_oid")
       .eq("m365_oid", session.user.oid)
       .maybeSingle();
     storedUser = data;
   }
 
   const displayName = storedUser?.name ?? session.user?.name ?? "there";
+
+  // Generated reports for this inspector, with their OneDrive links.
+  type ReportRow = {
+    id: string;
+    property_name: string;
+    inspection_date: string;
+    webUrl: string | null;
+  };
+  let reports: ReportRow[] = [];
+  if (storedUser?.id) {
+    const { data: generated } = await supabaseAdmin()
+      .from("inspections")
+      .select(
+        "id, property_name, inspection_date, onedrive_drive_id, generated_doc_onedrive_id",
+      )
+      .eq("user_id", storedUser.id)
+      .eq("status", "generated")
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    reports = await Promise.all(
+      (generated ?? []).map(async (r) => ({
+        id: r.id,
+        property_name: r.property_name,
+        inspection_date: r.inspection_date,
+        webUrl: r.generated_doc_onedrive_id
+          ? await getDriveItemWebUrl(
+              r.onedrive_drive_id,
+              r.generated_doc_onedrive_id,
+            )
+          : null,
+      })),
+    );
+  }
 
   return (
     <AppShell
@@ -106,6 +154,62 @@ export default async function DashboardPage() {
           </div>
         </Card>
       </div>
+
+      <section className="mt-4">
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#eef7fc] text-[#0072c6] dark:bg-sky-400/10 dark:text-sky-300">
+              <FileText className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <h2 className="text-base font-semibold text-[#111817] dark:text-zinc-50">
+              Generated reports
+            </h2>
+          </div>
+
+          {reports.length === 0 ? (
+            <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
+              No reports generated yet. Finish an inspection and generate its
+              report to see it here.
+            </p>
+          ) : (
+            <ul className="mt-4 divide-y divide-black/[.06] dark:divide-white/[.08]">
+              {reports.map((r) => (
+                <li
+                  key={r.id}
+                  className="flex items-center justify-between gap-3 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[#111817] dark:text-zinc-50">
+                      {r.property_name}
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {formatDateAU(r.inspection_date)}
+                    </p>
+                  </div>
+                  {r.webUrl ? (
+                    <a
+                      href={r.webUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-black/[.12] px-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-black/[.04] dark:border-white/[.18] dark:text-zinc-300 dark:hover:bg-white/[.08]"
+                    >
+                      <Download className="h-4 w-4" aria-hidden="true" />
+                      Open
+                    </a>
+                  ) : (
+                    <Link
+                      href={`/inspect/${r.id}/generate`}
+                      className="shrink-0 text-sm font-semibold text-[#0072c6] hover:underline"
+                    >
+                      View
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </section>
     </AppShell>
   );
 }

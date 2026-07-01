@@ -18,7 +18,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       authorization: {
         params: {
           scope:
-            "openid profile email offline_access User.Read Files.ReadWrite.All Mail.Send",
+            "openid profile email offline_access User.Read Files.ReadWrite.All Mail.Send Mail.ReadWrite",
         },
       },
     }),
@@ -98,7 +98,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               grant_type: "refresh_token",
               refresh_token: token.refreshToken,
               scope:
-                "openid profile email offline_access User.Read Files.ReadWrite.All Mail.Send",
+                "openid profile email offline_access User.Read Files.ReadWrite.All Mail.Send Mail.ReadWrite",
             }),
           },
         );

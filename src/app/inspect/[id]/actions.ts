@@ -5,7 +5,11 @@ import { auth } from "@/auth";
 import { uploadFileToFolder } from "@/lib/graph";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-export type ReportPhoto = { onedriveFileId: string; filename: string };
+/** What the upload action returns — OneDrive identity only. */
+export type UploadedPhoto = { onedriveFileId: string; filename: string };
+
+/** A photo collected for a report item; dimensions are known client-side. */
+export type ReportPhoto = UploadedPhoto & { width: number; height: number };
 
 /** Capture timestamp for filenames: YYYY-MM-DD_HHMMSS in Adelaide time. */
 function adelaideStamp() {
@@ -31,7 +35,7 @@ function adelaideStamp() {
 export async function uploadInspectionPhoto(
   inspectionId: string,
   formData: FormData,
-): Promise<ReportPhoto> {
+): Promise<UploadedPhoto> {
   const session = await auth();
   if (!session) throw new Error("Not signed in.");
 
@@ -106,6 +110,8 @@ export async function createReportedItem(
       local_uuid: crypto.randomUUID(),
       sync_status: "uploaded",
       taken_at: takenAt,
+      width: p.width,
+      height: p.height,
     }));
     const { error: photoErr } = await sb.from("photos").insert(rows);
     if (photoErr) {

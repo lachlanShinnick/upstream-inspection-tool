@@ -82,7 +82,11 @@ export function CaptureScreen({
   }, [toast]);
 
   /** Grab the current video frame, resize to 1920px long edge, encode JPEG. */
-  async function frameToJpeg(): Promise<Blob | null> {
+  async function frameToJpeg(): Promise<{
+    blob: Blob;
+    width: number;
+    height: number;
+  } | null> {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return null;
     const vw = video.videoWidth;
@@ -96,23 +100,27 @@ export function CaptureScreen({
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, w, h);
-    return new Promise((resolve) =>
+    const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob((b) => resolve(b), "image/jpeg", 0.85),
     );
+    return blob ? { blob, width: w, height: h } : null;
   }
 
   async function capture() {
     if (busy) return;
     setBusy(true);
     try {
-      const blob = await frameToJpeg();
-      if (!blob) throw new Error("Camera not ready.");
+      const shot = await frameToJpeg();
+      if (!shot) throw new Error("Camera not ready.");
       const fd = new FormData();
-      fd.append("file", blob, "photo.jpg");
-      const photo = await uploadInspectionPhoto(inspectionId, fd);
+      fd.append("file", shot.blob, "photo.jpg");
+      const uploaded = await uploadInspectionPhoto(inspectionId, fd);
       setTotalTaken((n) => n + 1);
       if (mode === "report") {
-        setReportPhotos((arr) => [...arr, photo]);
+        setReportPhotos((arr) => [
+          ...arr,
+          { ...uploaded, width: shot.width, height: shot.height },
+        ]);
       }
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Upload failed.");
@@ -172,11 +180,19 @@ export function CaptureScreen({
             </p>
             <p className="text-xs text-white/58">{inspectionDate}</p>
           </div>
-          <div className="shrink-0 rounded-lg bg-black/28 px-3 py-2 text-right backdrop-blur-md">
-            <p className="text-sm font-semibold">{headerMain}</p>
-            <p className="text-xs text-white/58">
-              {totalTaken} photos · {inReportSaved} in report
-            </p>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <div className="rounded-lg bg-black/28 px-3 py-2 text-right backdrop-blur-md">
+              <p className="text-sm font-semibold">{headerMain}</p>
+              <p className="text-xs text-white/58">
+                {totalTaken} photos · {inReportSaved} in report
+              </p>
+            </div>
+            <Link
+              href={`/inspect/${inspectionId}/generate`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-white/90 px-3 py-1.5 text-xs font-semibold text-black hover:bg-white"
+            >
+              Review &amp; generate
+            </Link>
           </div>
         </div>
       </header>
