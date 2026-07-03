@@ -23,7 +23,7 @@ async function getCurrentUserId() {
     .single();
 
   if (error || !user) {
-    throw new Error("Could not find the signed-in user in Supabase.");
+    throw new Error("Couldn't find your account. Try signing out and back in.");
   }
 
   return user.id as string;

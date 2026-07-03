@@ -17,7 +17,7 @@ export default async function NewInspectionPage() {
 
   if (!driveId || !folderId) {
     loadError =
-      "PROPERTIES_DRIVE_ID / PROPERTIES_FOLDER_ID are not set. Open /debug/properties-lookup to get them.";
+      "PROPERTIES_DRIVE_ID / PROPERTIES_FOLDER_ID are not set in the app's environment configuration.";
   } else {
     try {
       properties = await listSubfolders(driveId, folderId);

@@ -23,7 +23,7 @@ export async function saveReviewByToken(
   const sb = supabaseAdmin();
   for (const edit of edits) {
     const area = edit.area.trim();
-    if (!area) throw new Error("Every item needs a location.");
+    if (!area) throw new Error("Every item needs an area.");
     const { error } = await sb
       .from("action_items")
       .update({ area, comment: edit.comment.trim() })

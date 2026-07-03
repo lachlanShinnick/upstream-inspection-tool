@@ -49,7 +49,7 @@ export async function startInspection(
     .eq("m365_oid", session.user.oid)
     .single();
   if (userErr || !user) {
-    throw new Error("Could not find the signed-in user in Supabase.");
+    throw new Error("Couldn't find your account. Try signing out and back in.");
   }
 
   // Build the OneDrive folder tree (idempotent find-or-create at each level).

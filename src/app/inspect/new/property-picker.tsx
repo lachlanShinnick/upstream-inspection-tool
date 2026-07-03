@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { ArrowRight, Building2, Search } from "lucide-react";
 import type { GraphFolder } from "@/lib/graph";
+import { formatPropertyName } from "@/lib/propertyName";
 import { startInspection } from "./actions";
 
 export function PropertyPicker({ properties }: { properties: GraphFolder[] }) {
@@ -73,13 +74,20 @@ export function PropertyPicker({ properties }: { properties: GraphFolder[] }) {
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-base font-semibold text-[#111817] dark:text-zinc-50">
-                      {p.name}
+                      {formatPropertyName(p.name)}
                     </span>
                   </span>
                 </span>
                 <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold text-[#0072c6]">
-                  {busy ? "Creating..." : "Submit inspection"}
-                  {!busy && (
+                  <span className="hidden sm:inline">
+                    {busy ? "Creating..." : "Start inspection"}
+                  </span>
+                  {busy ? (
+                    <span
+                      className="h-4 w-4 animate-spin rounded-full border-2 border-[#0072c6] border-t-transparent"
+                      aria-label="Creating inspection"
+                    />
+                  ) : (
                     <ArrowRight
                       className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
                       aria-hidden="true"

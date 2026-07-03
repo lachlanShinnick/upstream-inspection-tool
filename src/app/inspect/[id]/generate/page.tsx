@@ -130,7 +130,8 @@ export default async function GeneratePage({
           </h2>
           <p className="mt-2 mb-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
             Fills the branded template with action items, photos and your
-            sign-off, saves it to OneDrive, then drafts an email to Dave.
+            sign-off, and saves it to your OneDrive. From there you can send
+            Dave a link to review the wording and download it.
           </p>
           <GeneratePanel
             inspectionId={inspection.id}
