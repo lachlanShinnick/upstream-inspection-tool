@@ -127,12 +127,12 @@ export default async function DashboardPage() {
               items, then generate the branded document for review.
             </p>
           </div>
-          <div className="grid gap-3 p-5 sm:grid-cols-3 sm:p-6">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3 p-5 sm:p-6">
             {(Object.keys(REPORT_TYPES) as ReportType[]).map((type) => {
               const report = REPORT_TYPES[type];
               return (
                 <Link key={type} href={`/inspect/new?type=${type}`}>
-                  <PrimaryButton className="w-full">
+                  <PrimaryButton className="min-h-12 w-full whitespace-normal px-3 text-center leading-snug">
                     + {report.newLabel}
                   </PrimaryButton>
                 </Link>
