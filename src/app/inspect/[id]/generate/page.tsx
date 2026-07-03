@@ -3,6 +3,7 @@ import { ArrowLeft, Camera } from "lucide-react";
 import { auth } from "@/auth";
 import { getDriveItemWebUrl } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
+import { reportTypeInfo } from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink } from "@/app/ui";
 import { GeneratePanel } from "./generate-panel";
@@ -26,7 +27,7 @@ export default async function GeneratePage({
   const { data: inspection } = await sb
     .from("inspections")
     .select(
-      "id, property_name, inspection_date, status, onedrive_drive_id, generated_doc_onedrive_id",
+      "id, property_name, inspection_date, report_type, status, onedrive_drive_id, generated_doc_onedrive_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -83,6 +84,7 @@ export default async function GeneratePage({
   }
 
   const alreadyGenerated = inspection.status === "generated";
+  const report = reportTypeInfo(inspection.report_type);
   const canGenerate = itemCount > 0 && pendingPhotoCount === 0;
 
   const disabledReason =
@@ -105,7 +107,7 @@ export default async function GeneratePage({
     <AppShell
       eyebrow="Generate report"
       title={formatPropertyName(inspection.property_name)}
-      subtitle={`Council routine inspection · ${formatDateAU(inspection.inspection_date)}`}
+      subtitle={`${report.title} · ${formatDateAU(inspection.inspection_date)}`}
       actions={
         <>
           <NavLink href={`/inspect/${id}`}>
@@ -126,6 +128,7 @@ export default async function GeneratePage({
           </h2>
           <dl className="mt-4 space-y-3 text-sm">
             <SummaryRow label="Property" value={formatPropertyName(inspection.property_name)} />
+            <SummaryRow label="Report" value={report.title} />
             <SummaryRow
               label="Date"
               value={formatDateAU(inspection.inspection_date)}

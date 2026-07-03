@@ -4,9 +4,16 @@ import { useMemo, useState, useTransition } from "react";
 import { ArrowRight, Building2, Search } from "lucide-react";
 import type { GraphFolder } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
+import type { ReportType } from "@/lib/reportTypes";
 import { startInspection } from "./actions";
 
-export function PropertyPicker({ properties }: { properties: GraphFolder[] }) {
+export function PropertyPicker({
+  properties,
+  reportType,
+}: {
+  properties: GraphFolder[];
+  reportType: ReportType;
+}) {
   const [query, setQuery] = useState("");
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +31,7 @@ export function PropertyPicker({ properties }: { properties: GraphFolder[] }) {
     startTransition(async () => {
       try {
         // Resolves into a redirect on success; surfaces a message on failure.
-        await startInspection(p.id, p.name);
+        await startInspection(p.id, p.name, reportType);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
         setPendingId(null);

@@ -6,6 +6,7 @@ import { polishComment } from "@/lib/commentPolish";
 import { getGraphClient } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
 import { generateReport } from "@/lib/reportGeneration";
+import { reportTypeInfo } from "@/lib/reportTypes";
 import { mintOrReuseReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -86,7 +87,7 @@ export async function sendForReview(
 
   const { data: inspection, error } = await supabaseAdmin()
     .from("inspections")
-    .select("property_name, inspection_date, generated_doc_onedrive_id")
+    .select("property_name, inspection_date, report_type, generated_doc_onedrive_id")
     .eq("id", inspectionId)
     .single();
   if (error || !inspection) throw new Error("Inspection not found.");
@@ -96,7 +97,8 @@ export async function sendForReview(
 
   const dateAU = formatDateAU(inspection.inspection_date);
   const propertyName = formatPropertyName(inspection.property_name);
-  const subject = `Council Inspection Report Ready — ${propertyName} — ${dateAU}`;
+  const report = reportTypeInfo(inspection.report_type);
+  const subject = `${report.title} Ready — ${propertyName} — ${dateAU}`;
 
   const token = await mintOrReuseReviewToken(inspectionId);
   const appBaseUrl = process.env.APP_BASE_URL;
@@ -116,7 +118,7 @@ export async function sendForReview(
       body: {
         contentType: "Text",
         content: `Hi,
-The council routine inspection report for ${propertyName} (${dateAU}) is ready for your review.
+The ${report.title.toLowerCase()} for ${propertyName} (${dateAU}) is ready for your review.
 
 Review, edit and download it here: ${reviewUrl}
 

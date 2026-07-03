@@ -4,8 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 const APP_NAME = "Upstream Inspections";
-const APP_DESCRIPTION =
-  "Council routine inspection reports for Upstream Property.";
+const APP_DESCRIPTION = "Inspection reports for Upstream Property.";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

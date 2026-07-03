@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Upstream Inspections",
     short_name: "Upstream",
-    description: "Council routine inspection reports for Upstream Property.",
+    description: "Inspection reports for Upstream Property.",
     start_url: "/",
     scope: "/",
     display: "standalone",

@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { auth } from "@/auth";
 import { downloadDriveItem, uploadFileToFolder } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
+import { reportTypeInfo } from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const TEMPLATE_PATH = path.join(
@@ -126,6 +127,7 @@ export type RenderedReport = {
   inspection: {
     property_name: string;
     inspection_date: string;
+    report_title: string;
     onedrive_drive_id: string;
     onedrive_subfolder_id: string;
   };
@@ -149,7 +151,7 @@ export async function renderReportDocx(
   const { data: inspection, error: insErr } = await sb
     .from("inspections")
     .select(
-      "id, property_name, inspection_date, status, onedrive_drive_id, onedrive_subfolder_id, user_id",
+      "id, property_name, inspection_date, report_type, status, onedrive_drive_id, onedrive_subfolder_id, user_id",
     )
     .eq("id", inspectionId)
     .single();
@@ -157,6 +159,7 @@ export async function renderReportDocx(
   // Folder names are filed as "Suburb, Street, Number"; the report and any
   // downstream filenames should read as a normal address.
   const displayPropertyName = formatPropertyName(inspection.property_name);
+  const report = reportTypeInfo(inspection.report_type);
 
   const { data: user, error: userErr } = await sb
     .from("users")
@@ -292,6 +295,7 @@ export async function renderReportDocx(
 
   const data = {
     property_name: displayPropertyName,
+    report_title: report.title,
     inspection_date: formatDateAU(inspection.inspection_date),
     inspector_name: user.name,
     inspector_position: user.position ?? "",
@@ -360,6 +364,7 @@ export async function renderReportDocx(
     inspection: {
       property_name: displayPropertyName,
       inspection_date: inspection.inspection_date,
+      report_title: report.title,
       onedrive_drive_id: driveId,
       onedrive_subfolder_id: inspection.onedrive_subfolder_id,
     },
@@ -389,7 +394,8 @@ export async function generateReport(
     .toISOString()
     .replace(/[-:]/g, "")
     .replace(/\.\d{3}Z$/, "Z");
-  const filename = `Council Inspection Report - ${safeProperty} - ${inspection.inspection_date} - ${generatedAt}.docx`;
+  const safeReportTitle = inspection.report_title.replace(/[\\/:*?"<>|]/g, "-");
+  const filename = `${safeReportTitle} - ${safeProperty} - ${inspection.inspection_date} - ${generatedAt}.docx`;
   const uploaded = await uploadFileToFolder(
     inspection.onedrive_drive_id,
     inspection.onedrive_subfolder_id,

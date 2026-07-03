@@ -2,12 +2,20 @@ import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { auth } from "@/auth";
 import { listSubfolders, type GraphFolder } from "@/lib/graph";
+import { parseReportType, REPORT_TYPES } from "@/lib/reportTypes";
 import { AppShell, NavLink } from "@/app/ui";
 import { PropertyPicker } from "./property-picker";
 
-export default async function NewInspectionPage() {
+export default async function NewInspectionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string }>;
+}) {
   const session = await auth();
   if (!session) redirect("/login");
+  const { type } = await searchParams;
+  const reportType = parseReportType(type);
+  const report = REPORT_TYPES[reportType];
 
   const driveId = process.env.PROPERTIES_DRIVE_ID;
   const folderId = process.env.PROPERTIES_FOLDER_ID;
@@ -31,9 +39,9 @@ export default async function NewInspectionPage() {
   return (
     <AppShell
       align="center"
-      eyebrow="New inspection"
+      eyebrow={report.newLabel}
       title="Select a property"
-      subtitle="Choose the property folder for this council routine inspection. The app will create the dated OneDrive inspection folder automatically."
+      subtitle={`Choose the property folder for this ${report.label.toLowerCase()}. The app will create the dated OneDrive inspection folder automatically.`}
       actions={
         <NavLink href="/dashboard">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -50,7 +58,7 @@ export default async function NewInspectionPage() {
             {loadError}
           </p>
         ) : (
-          <PropertyPicker properties={properties} />
+          <PropertyPicker properties={properties} reportType={reportType} />
         )}
       </div>
     </AppShell>

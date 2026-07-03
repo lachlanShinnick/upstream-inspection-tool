@@ -1,5 +1,6 @@
 import { Download, FileText } from "lucide-react";
 import { formatPropertyName } from "@/lib/propertyName";
+import { reportTypeInfo } from "@/lib/reportTypes";
 import { validateReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { Card, ReviewShell } from "@/app/review/ui";
@@ -34,7 +35,7 @@ export default async function ReviewPage({
 
   const { data: inspection } = await sb
     .from("inspections")
-    .select("property_name, inspection_date")
+    .select("property_name, inspection_date, report_type")
     .eq("id", scope.inspectionId)
     .single();
 
@@ -79,7 +80,7 @@ export default async function ReviewPage({
       }
       subtitle={
         inspection
-          ? `Council routine inspection · ${formatDateAU(inspection.inspection_date)}`
+          ? `${reportTypeInfo(inspection.report_type).title} · ${formatDateAU(inspection.inspection_date)}`
           : undefined
       }
       actions={

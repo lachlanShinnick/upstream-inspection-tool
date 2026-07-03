@@ -42,7 +42,7 @@ export async function GET(
       scope.inspectionId,
       downloadDriveItemAppOnly,
     );
-    const baseName = `Council Inspection Report - ${safeFilenamePart(
+    const baseName = `${safeFilenamePart(inspection.report_title)} - ${safeFilenamePart(
       inspection.property_name,
     )} - ${inspection.inspection_date}`;
 

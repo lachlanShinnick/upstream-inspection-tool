@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { contentDisposition, safeFilenamePart } from "@/lib/downloadHeaders";
 import { downloadDriveItem, downloadDriveItemAsPdf } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
+import { reportTypeInfo } from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const DOCX_MIME =
@@ -23,7 +24,7 @@ export async function GET(
   const { data: inspection, error } = await supabaseAdmin()
     .from("inspections")
     .select(
-      "property_name, inspection_date, onedrive_drive_id, generated_doc_onedrive_id",
+      "property_name, inspection_date, report_type, onedrive_drive_id, generated_doc_onedrive_id",
     )
     .eq("id", id)
     .single();
@@ -38,7 +39,7 @@ export async function GET(
     });
   }
 
-  const baseName = `Council Inspection Report - ${safeFilenamePart(
+  const baseName = `${safeFilenamePart(reportTypeInfo(inspection.report_type).title)} - ${safeFilenamePart(
     formatPropertyName(inspection.property_name),
   )} - ${inspection.inspection_date}`;
 

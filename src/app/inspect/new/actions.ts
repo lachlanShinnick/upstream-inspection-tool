@@ -3,10 +3,11 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { findOrCreateSubfolder } from "@/lib/graph";
+import { parseReportType, REPORT_TYPES, type ReportType } from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 /** Today's date in Adelaide, as both an ISO date and the folder-name format. */
-function adelaideToday() {
+function adelaideToday(reportType: ReportType) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Australia/Adelaide",
     year: "numeric",
@@ -19,7 +20,7 @@ function adelaideToday() {
   const d = get("day");
   return {
     isoDate: `${y}-${m}-${d}`,
-    folderName: `${y} ${m} ${d} - Council Inspection`,
+    folderName: `${y} ${m} ${d} - ${REPORT_TYPES[reportType].folderSuffix}`,
   };
 }
 
@@ -31,11 +32,13 @@ function adelaideToday() {
 export async function startInspection(
   propertyFolderId: string,
   propertyName: string,
+  requestedReportType: ReportType,
 ) {
   const session = await auth();
   if (!session?.user?.oid) {
     throw new Error("Not signed in.");
   }
+  const reportType = parseReportType(requestedReportType);
 
   const driveId = process.env.PROPERTIES_DRIVE_ID;
   if (!driveId) {
@@ -55,7 +58,7 @@ export async function startInspection(
   // Build the OneDrive folder tree (idempotent find-or-create at each level).
   const fm = await findOrCreateSubfolder(driveId, propertyFolderId, "FM");
   const inspections = await findOrCreateSubfolder(driveId, fm.id, "Inspections");
-  const { isoDate, folderName } = adelaideToday();
+  const { isoDate, folderName } = adelaideToday(reportType);
   const dated = await findOrCreateSubfolder(driveId, inspections.id, folderName);
 
   const { data: inspection, error: insertErr } = await supabaseAdmin()
@@ -67,6 +70,7 @@ export async function startInspection(
       onedrive_subfolder_id: dated.id,
       user_id: user.id,
       inspection_date: isoDate,
+      report_type: reportType,
       status: "draft",
     })
     .select("id")

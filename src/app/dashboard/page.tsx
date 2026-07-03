@@ -11,6 +11,7 @@ import {
 import { auth, signOut } from "@/auth";
 import { getDriveItemWebUrl } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
+import { REPORT_TYPES, reportTypeInfo, type ReportType } from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink, PrimaryButton } from "@/app/ui";
 
@@ -48,6 +49,7 @@ export default async function DashboardPage() {
     id: string;
     property_name: string;
     inspection_date: string;
+    report_type: string | null;
     webUrl: string | null;
   };
   let reports: ReportRow[] = [];
@@ -55,7 +57,7 @@ export default async function DashboardPage() {
     const { data: generated } = await supabaseAdmin()
       .from("inspections")
       .select(
-        "id, property_name, inspection_date, onedrive_drive_id, generated_doc_onedrive_id",
+        "id, property_name, inspection_date, report_type, onedrive_drive_id, generated_doc_onedrive_id",
       )
       .eq("user_id", storedUser.id)
       .eq("status", "generated")
@@ -67,6 +69,7 @@ export default async function DashboardPage() {
         id: r.id,
         property_name: r.property_name,
         inspection_date: r.inspection_date,
+        report_type: r.report_type,
         webUrl: r.generated_doc_onedrive_id
           ? await getDriveItemWebUrl(
               r.onedrive_drive_id,
@@ -81,7 +84,7 @@ export default async function DashboardPage() {
     <AppShell
       eyebrow="Dashboard"
       title={`Welcome, ${displayName}`}
-      subtitle="Start a council routine inspection, keep your profile details current, and generate consistent reports from the field."
+      subtitle="Start an inspection report, keep your profile details current, and generate consistent reports from the field."
       actions={
         <>
           <NavLink href="/account">
@@ -114,7 +117,7 @@ export default async function DashboardPage() {
                   Field workflow
                 </p>
                 <h2 className="mt-3 text-2xl font-semibold tracking-normal">
-                  Council Routine Inspection
+                  Inspection Reports
                 </h2>
               </div>
               <ClipboardList className="h-8 w-8 text-[#0072c6]" aria-hidden="true" />
@@ -124,12 +127,17 @@ export default async function DashboardPage() {
               items, then generate the branded document for review.
             </p>
           </div>
-          <div className="p-5 sm:p-6">
-            <Link href="/inspect/new">
-              <PrimaryButton className="w-full sm:w-auto">
-                + New Council Inspection
-              </PrimaryButton>
-            </Link>
+          <div className="grid gap-3 p-5 sm:grid-cols-3 sm:p-6">
+            {(Object.keys(REPORT_TYPES) as ReportType[]).map((type) => {
+              const report = REPORT_TYPES[type];
+              return (
+                <Link key={type} href={`/inspect/new?type=${type}`}>
+                  <PrimaryButton className="w-full">
+                    + {report.newLabel}
+                  </PrimaryButton>
+                </Link>
+              );
+            })}
           </div>
         </Card>
 
@@ -184,6 +192,7 @@ export default async function DashboardPage() {
                       {formatPropertyName(r.property_name)}
                     </p>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {reportTypeInfo(r.report_type).title} ·{" "}
                       {formatDateAU(r.inspection_date)}
                     </p>
                   </div>
