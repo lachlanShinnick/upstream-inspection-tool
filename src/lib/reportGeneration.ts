@@ -36,8 +36,8 @@ const REPORT_PHOTOS_PER_ROW = 3;
 type PhotoRow = {
   id: string;
   action_item_id: string;
-  onedrive_file_id: string;
-  filename: string;
+  onedrive_file_id: string | null;
+  filename: string | null;
   width: number | null;
   height: number | null;
   taken_at: string | null;
@@ -187,6 +187,12 @@ export async function renderReportDocx(
     .order("taken_at", { ascending: true });
   if (photoErr) throw new Error(`Failed to load photos: ${photoErr.message}`);
   const photos = (photoData ?? []) as PhotoRow[];
+  const unsynced = photos.filter((p) => !p.onedrive_file_id);
+  if (unsynced.length > 0) {
+    throw new Error(
+      `${unsynced.length} photo${unsynced.length === 1 ? "" : "s"} still syncing. Leave the capture screen open until syncing finishes, then generate again.`,
+    );
+  }
 
   const photosByItem = new Map<string, PhotoRow[]>();
   for (const p of photos) {
@@ -201,16 +207,17 @@ export async function renderReportDocx(
   const bytesByFileId = new Map<string, Buffer>();
   const reportImageByFileId = new Map<string, Buffer>();
   for (const p of photos) {
-    if (!bytesByFileId.has(p.onedrive_file_id)) {
+    const fileId = p.onedrive_file_id!;
+    if (!bytesByFileId.has(fileId)) {
       const originalBytes = await downloadWithRetry(
         fetchBytes,
         driveId,
-        p.onedrive_file_id,
-        `photo ${p.filename}`,
+        fileId,
+        `photo ${p.filename ?? p.id}`,
       );
-      bytesByFileId.set(p.onedrive_file_id, originalBytes);
+      bytesByFileId.set(fileId, originalBytes);
       reportImageByFileId.set(
-        p.onedrive_file_id,
+        fileId,
         await fitReportPhotoBox(originalBytes),
       );
     }
@@ -244,7 +251,7 @@ export async function renderReportDocx(
       comment: item.comment ?? "",
       image_refs: photoNumbers.join(", "),
       photos: itemPhotos.map((p, j) => {
-        const reportImage = reportImageByFileId.get(p.onedrive_file_id)!;
+        const reportImage = reportImageByFileId.get(p.onedrive_file_id!)!;
         sizeByValue.set(reportImage, {
           width: REPORT_PHOTO_WIDTH,
           height: REPORT_PHOTO_HEIGHT,

@@ -60,6 +60,7 @@ export default async function GeneratePage({
   const itemCount = items?.length ?? 0;
 
   let photoCount = 0;
+  let pendingPhotoCount = 0;
   if (itemCount > 0) {
     const { count } = await sb
       .from("photos")
@@ -69,15 +70,26 @@ export default async function GeneratePage({
         items!.map((i) => i.id),
       );
     photoCount = count ?? 0;
+
+    const { count: pendingCount } = await sb
+      .from("photos")
+      .select("id", { count: "exact", head: true })
+      .in(
+        "action_item_id",
+        items!.map((i) => i.id),
+      )
+      .neq("sync_status", "uploaded");
+    pendingPhotoCount = pendingCount ?? 0;
   }
 
   const alreadyGenerated = inspection.status === "generated";
-  // Generation (and re-generation) is allowed whenever there's at least one item.
-  const canGenerate = itemCount > 0;
+  const canGenerate = itemCount > 0 && pendingPhotoCount === 0;
 
   const disabledReason =
     itemCount === 0
       ? "Add at least one action item before generating."
+      : pendingPhotoCount > 0
+        ? `${pendingPhotoCount} photo${pendingPhotoCount === 1 ? "" : "s"} still syncing. Leave the capture screen open until syncing finishes.`
       : null;
 
   // If a doc already exists, resolve its web URL for the download link.
@@ -120,6 +132,10 @@ export default async function GeneratePage({
             />
             <SummaryRow label="Action items" value={String(itemCount)} />
             <SummaryRow label="Photos" value={String(photoCount)} />
+            <SummaryRow
+              label="Sync"
+              value={pendingPhotoCount === 0 ? "All uploaded" : `${pendingPhotoCount} pending`}
+            />
             <SummaryRow label="Status" value={inspection.status} />
           </dl>
         </Card>

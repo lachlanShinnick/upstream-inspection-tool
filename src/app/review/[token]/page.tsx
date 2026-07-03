@@ -52,13 +52,14 @@ export default async function ReviewPage({
           .from("photos")
           .select("id, action_item_id, filename, taken_at")
           .in("action_item_id", itemIds)
+          .eq("sync_status", "uploaded")
           .order("taken_at", { ascending: true })
       : { data: [] };
 
   const photosByItem = new Map<string, { id: string; filename: string }[]>();
   for (const photo of photos ?? []) {
     const arr = photosByItem.get(photo.action_item_id) ?? [];
-    arr.push({ id: photo.id, filename: photo.filename });
+    arr.push({ id: photo.id, filename: photo.filename ?? "Photo" });
     photosByItem.set(photo.action_item_id, arr);
   }
 

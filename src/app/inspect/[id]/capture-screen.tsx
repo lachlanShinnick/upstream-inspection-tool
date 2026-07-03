@@ -8,6 +8,17 @@ import {
   uploadInspectionPhoto,
   type ReportPhoto,
 } from "./actions";
+import {
+  deleteItemSave,
+  deletePhoto as deleteQueuedPhoto,
+  getPhoto,
+  listItemSaves,
+  listPhotos,
+  putItemSave,
+  putPhoto,
+  type QueuedItemSave,
+  type QueuedPhoto,
+} from "@/lib/offline/db";
 
 type Mode = "default" | "report";
 
@@ -57,6 +68,7 @@ export function CaptureScreen({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const drainingRef = useRef(false);
 
   // Read once, up front, so the initial state of several fields below can
   // share it without re-reading localStorage per field.
@@ -68,6 +80,7 @@ export function CaptureScreen({
 
   const [totalTaken, setTotalTaken] = useState(0);
   const [inReportSaved, setInReportSaved] = useState(initialInReport);
+  const [pendingSync, setPendingSync] = useState(0);
   const [reportPhotos, setReportPhotos] = useState<ReportPhoto[]>(
     initialDraft?.reportPhotos ?? [],
   );
@@ -140,6 +153,128 @@ export function CaptureScreen({
     return () => clearTimeout(t);
   }, [toast]);
 
+  async function refreshPendingSync() {
+    try {
+      const [photos, items] = await Promise.all([listPhotos(), listItemSaves()]);
+      setPendingSync(
+        photos.filter((p) => p.state !== "uploaded" || p.blob).length +
+          items.length,
+      );
+    } catch {
+      setPendingSync(0);
+    }
+  }
+
+  async function queueBackoff<T extends { attempts: number; nextAttemptAt: number }>(
+    record: T,
+  ): Promise<T> {
+    const attempts = record.attempts + 1;
+    return {
+      ...record,
+      attempts,
+      nextAttemptAt: Date.now() + Math.min(60_000, 1000 * 2 ** attempts),
+    };
+  }
+
+  async function cleanupUploadedPhoto(localUuid: string) {
+    const itemSaves = await listItemSaves();
+    const stillReferenced = itemSaves.some((item) =>
+      item.photos.some((photo) => photo.localUuid === localUuid),
+    );
+    if (!stillReferenced) await deleteQueuedPhoto(localUuid);
+  }
+
+  async function drainQueue() {
+    if (drainingRef.current) return;
+    drainingRef.current = true;
+    try {
+      const now = Date.now();
+      const queuedPhotos = await listPhotos();
+      for (const photo of queuedPhotos) {
+        if (photo.state === "uploaded") {
+          await cleanupUploadedPhoto(photo.localUuid);
+          continue;
+        }
+        if (!photo.blob || photo.nextAttemptAt > now) continue;
+        try {
+          const fd = new FormData();
+          fd.append("file", photo.blob, photo.filename ?? "photo.jpg");
+          const uploaded = await uploadInspectionPhoto(
+            inspectionId,
+            photo.localUuid,
+            photo.takenAt,
+            fd,
+          );
+          await putPhoto({
+            ...photo,
+            blob: undefined,
+            state: "uploaded",
+            fileId: uploaded.onedriveFileId,
+            filename: uploaded.filename,
+            attempts: 0,
+            nextAttemptAt: 0,
+          });
+          await cleanupUploadedPhoto(photo.localUuid);
+        } catch {
+          await putPhoto(await queueBackoff(photo));
+        }
+      }
+
+      const itemSaves = await listItemSaves();
+      for (const itemSave of itemSaves) {
+        if (itemSave.inspectionId !== inspectionId || itemSave.nextAttemptAt > now) {
+          continue;
+        }
+        try {
+          const photos = await Promise.all(
+            itemSave.photos.map(async (p) => {
+              const queued = await getPhoto(p.localUuid);
+              return {
+                ...p,
+                onedriveFileId: queued?.fileId,
+                filename: queued?.filename,
+              };
+            }),
+          );
+          await createReportedItem(
+            itemSave.inspectionId,
+            itemSave.localUuid,
+            itemSave.area,
+            itemSave.comment,
+            photos,
+          );
+          await deleteItemSave(itemSave.localUuid);
+          for (const photo of photos) {
+            const queued = await getPhoto(photo.localUuid);
+            if (queued?.state === "uploaded") {
+              await deleteQueuedPhoto(photo.localUuid);
+            }
+          }
+          setToast("Action item synced.");
+        } catch {
+          await putItemSave(await queueBackoff(itemSave));
+        }
+      }
+    } finally {
+      drainingRef.current = false;
+      await refreshPendingSync();
+    }
+  }
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      void refreshPendingSync();
+      void drainQueue();
+    }, 0);
+    const onOnline = () => void drainQueue();
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("online", onOnline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inspectionId]);
+
   /** Grab the current video frame, resize to 1920px long edge, encode JPEG. */
   async function frameToJpeg(): Promise<{
     blob: Blob;
@@ -171,18 +306,31 @@ export function CaptureScreen({
     try {
       const shot = await frameToJpeg();
       if (!shot) throw new Error("Camera not ready.");
-      const fd = new FormData();
-      fd.append("file", shot.blob, "photo.jpg");
-      const uploaded = await uploadInspectionPhoto(inspectionId, fd);
+      const localUuid = crypto.randomUUID();
+      const takenAt = new Date().toISOString();
+      const queued: QueuedPhoto = {
+        localUuid,
+        inspectionId,
+        blob: shot.blob,
+        width: shot.width,
+        height: shot.height,
+        takenAt,
+        state: "queued",
+        attempts: 0,
+        nextAttemptAt: 0,
+      };
+      await putPhoto(queued);
       setTotalTaken((n) => n + 1);
       if (mode === "report") {
         setReportPhotos((arr) => [
           ...arr,
-          { ...uploaded, width: shot.width, height: shot.height },
+          { localUuid, width: shot.width, height: shot.height, takenAt },
         ]);
       }
+      await refreshPendingSync();
+      void drainQueue();
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Upload failed.");
+      setToast(e instanceof Error ? e.message : "Photo capture failed.");
     } finally {
       setBusy(false);
     }
@@ -202,7 +350,21 @@ export function CaptureScreen({
 
   async function saveItem(area: string, comment: string) {
     const photosForItem = reportPhotos;
-    await createReportedItem(inspectionId, area, comment, photosForItem);
+    const itemSave: QueuedItemSave = {
+      localUuid: crypto.randomUUID(),
+      inspectionId,
+      area,
+      comment,
+      photos: photosForItem.map((p) => ({
+        localUuid: p.localUuid,
+        width: p.width,
+        height: p.height,
+        takenAt: p.takenAt,
+      })),
+      attempts: 0,
+      nextAttemptAt: 0,
+    };
+    await putItemSave(itemSave);
     setInReportSaved((n) => n + photosForItem.length);
     const trimmed = area.trim();
     if (trimmed && !areas.includes(trimmed)) setAreas((a) => [...a, trimmed]);
@@ -210,10 +372,12 @@ export function CaptureScreen({
     setShowForm(false);
     setMode("default");
     setToast(
-      `Action item saved with ${photosForItem.length} photo${
+      `Action item queued with ${photosForItem.length} photo${
         photosForItem.length === 1 ? "" : "s"
       }.`,
     );
+    await refreshPendingSync();
+    void drainQueue();
   }
 
   const headerMain =
@@ -244,6 +408,7 @@ export function CaptureScreen({
               <p className="text-sm font-semibold">{headerMain}</p>
               <p className="text-xs text-white/58">
                 {totalTaken} photos · {inReportSaved} in report
+                {pendingSync > 0 ? ` · ${pendingSync} syncing` : " · synced"}
               </p>
             </div>
             <Link

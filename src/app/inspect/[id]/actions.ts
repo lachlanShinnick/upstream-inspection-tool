@@ -8,10 +8,21 @@ import { uploadFileToFolder } from "@/lib/graph";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 /** What the upload action returns — OneDrive identity only. */
-export type UploadedPhoto = { onedriveFileId: string; filename: string };
+export type UploadedPhoto = {
+  localUuid: string;
+  onedriveFileId: string;
+  filename: string;
+};
 
 /** A photo collected for a report item; dimensions are known client-side. */
-export type ReportPhoto = UploadedPhoto & { width: number; height: number };
+export type ReportPhoto = {
+  localUuid: string;
+  onedriveFileId?: string;
+  filename?: string;
+  width: number;
+  height: number;
+  takenAt: string;
+};
 
 /** Capture timestamp for filenames: YYYY-MM-DD_HHMMSS in Adelaide time. */
 function adelaideStamp() {
@@ -36,10 +47,13 @@ function adelaideStamp() {
  */
 export async function uploadInspectionPhoto(
   inspectionId: string,
+  localUuid: string,
+  takenAt: string,
   formData: FormData,
 ): Promise<UploadedPhoto> {
   const session = await auth();
   if (!session) throw new Error("Not signed in.");
+  if (!localUuid) throw new Error("Missing local photo id.");
 
   const file = formData.get("file");
   if (!(file instanceof File)) throw new Error("No photo supplied.");
@@ -51,7 +65,8 @@ export async function uploadInspectionPhoto(
     .single();
   if (error || !inspection) throw new Error("Inspection not found.");
 
-  const filename = `${adelaideStamp()}_${crypto.randomUUID().slice(0, 8)}.jpg`;
+  const stamp = takenAt ? takenAt.replace(/[-:]/g, "").slice(0, 15) : adelaideStamp();
+  const filename = `${stamp}_${localUuid.slice(0, 8)}.jpg`;
   const bytes = Buffer.from(await file.arrayBuffer());
 
   const item = await uploadFileToFolder(
@@ -62,7 +77,19 @@ export async function uploadInspectionPhoto(
     "image/jpeg",
   );
 
-  return { onedriveFileId: item.id, filename: item.name };
+  const { error: patchErr } = await supabaseAdmin()
+    .from("photos")
+    .update({
+      onedrive_file_id: item.id,
+      filename: item.name,
+      sync_status: "uploaded",
+    })
+    .eq("local_uuid", localUuid);
+  if (patchErr) {
+    throw new Error(`Photo uploaded, but couldn't mark it synced: ${patchErr.message}`);
+  }
+
+  return { localUuid, onedriveFileId: item.id, filename: item.name };
 }
 
 /**
@@ -71,17 +98,25 @@ export async function uploadInspectionPhoto(
  */
 export async function createReportedItem(
   inspectionId: string,
+  localUuid: string,
   area: string,
   comment: string,
   photos: ReportPhoto[],
 ): Promise<{ id: string; area: string; comment: string }> {
   const session = await auth();
   if (!session) throw new Error("Not signed in.");
+  if (!localUuid) throw new Error("Missing local action item id.");
 
   const trimmedArea = area.trim();
   if (!trimmedArea) throw new Error("Area is required.");
 
   const sb = supabaseAdmin();
+
+  const { data: existing } = await sb
+    .from("action_items")
+    .select("id, area, comment")
+    .eq("local_uuid", localUuid)
+    .maybeSingle();
 
   // sort_order = position at the end of the current list.
   const { count } = await sb
@@ -89,34 +124,40 @@ export async function createReportedItem(
     .select("id", { count: "exact", head: true })
     .eq("inspection_id", inspectionId);
 
-  const { data: item, error: itemErr } = await sb
-    .from("action_items")
-    .insert({
-      inspection_id: inspectionId,
-      area: trimmedArea,
-      comment: comment.trim(),
-      original_comment: comment.trim(),
-      sort_order: count ?? 0,
-    })
-    .select("id, area, comment")
-    .single();
-  if (itemErr || !item) {
-    throw new Error(`Failed to save action item: ${itemErr?.message ?? "unknown"}`);
+  let item = existing;
+  if (!item) {
+    const { data: inserted, error: itemErr } = await sb
+      .from("action_items")
+      .insert({
+        inspection_id: inspectionId,
+        local_uuid: localUuid,
+        area: trimmedArea,
+        comment: comment.trim(),
+        original_comment: comment.trim(),
+        sort_order: count ?? 0,
+      })
+      .select("id, area, comment")
+      .single();
+    if (itemErr || !inserted) {
+      throw new Error(`Failed to save action item: ${itemErr?.message ?? "unknown"}`);
+    }
+    item = inserted;
   }
 
   if (photos.length > 0) {
-    const takenAt = new Date().toISOString();
     const rows = photos.map((p) => ({
       action_item_id: item.id,
-      onedrive_file_id: p.onedriveFileId,
-      filename: p.filename,
-      local_uuid: crypto.randomUUID(),
-      sync_status: "uploaded",
-      taken_at: takenAt,
+      onedrive_file_id: p.onedriveFileId ?? null,
+      filename: p.filename ?? null,
+      local_uuid: p.localUuid,
+      sync_status: p.onedriveFileId ? "uploaded" : "pending",
+      taken_at: p.takenAt,
       width: p.width,
       height: p.height,
     }));
-    const { error: photoErr } = await sb.from("photos").insert(rows);
+    const { error: photoErr } = await sb
+      .from("photos")
+      .upsert(rows, { onConflict: "local_uuid" });
     if (photoErr) {
       throw new Error(`Failed to save photos: ${photoErr.message}`);
     }
@@ -128,17 +169,19 @@ export async function createReportedItem(
   // only changes when someone explicitly saves an edit from a review screen.
   const itemId = item.id;
   const original = item.comment;
-  after(async () => {
-    const polished = await polishComment(original);
-    if (!polished) return;
-    const { error } = await supabaseAdmin()
-      .from("action_items")
-      .update({ ai_comment: polished })
-      .eq("id", itemId);
-    if (error) {
-      console.error("[createReportedItem] failed to save ai_comment:", error.message);
-    }
-  });
+  if (!existing) {
+    after(async () => {
+      const polished = await polishComment(original);
+      if (!polished) return;
+      const { error } = await supabaseAdmin()
+        .from("action_items")
+        .update({ ai_comment: polished })
+        .eq("id", itemId);
+      if (error) {
+        console.error("[createReportedItem] failed to save ai_comment:", error.message);
+      }
+    });
+  }
 
   revalidatePath(`/inspect/${inspectionId}`);
   return item;

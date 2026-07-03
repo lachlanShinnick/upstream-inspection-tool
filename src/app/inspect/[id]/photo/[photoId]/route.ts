@@ -34,6 +34,9 @@ export async function GET(
   if (error || !photo || !belongsToInspection) {
     return new Response("Photo not found.", { status: 404 });
   }
+  if (!photo.onedrive_file_id) {
+    return new Response("Photo is still syncing.", { status: 409 });
+  }
 
   const { data: inspection } = await sb
     .from("inspections")
