@@ -10,6 +10,11 @@ import { validateReviewToken } from "@/lib/reviewToken";
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
+// Rendering re-downloads every photo and, for PDF, does an extra
+// upload-then-convert round trip through Graph — comfortably past the
+// platform's 10s default. Raise the ceiling (60s is the max on Vercel Hobby).
+export const maxDuration = 60;
+
 /**
  * Token-scoped download for the reviewer page. Unlike the inspector's static
  * download route, this always re-renders from the inspection's *current*
@@ -77,6 +82,7 @@ export async function GET(
   } catch (e) {
     const message =
       e instanceof Error ? e.message : "Couldn't prepare the download.";
+    console.error("[review download] failed:", message);
     return new Response(message, { status: 502 });
   }
 }

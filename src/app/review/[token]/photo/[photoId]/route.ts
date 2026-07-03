@@ -58,7 +58,11 @@ export async function GET(
         "Cache-Control": "private, max-age=3600",
       },
     });
-  } catch {
+  } catch (e) {
+    console.error(
+      "[review photo] app-only Graph download failed:",
+      e instanceof Error ? e.message : e,
+    );
     return new Response("Couldn't load photo.", { status: 502 });
   }
 }
