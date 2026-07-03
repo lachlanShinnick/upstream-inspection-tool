@@ -69,6 +69,7 @@ export function CaptureScreen({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const drainingRef = useRef(false);
+  const reportPhotosRef = useRef<ReportPhoto[]>([]);
 
   // Read once, up front, so the initial state of several fields below can
   // share it without re-reading localStorage per field.
@@ -98,6 +99,7 @@ export function CaptureScreen({
   // Cleared once the item is saved or the report is cancelled (mode flips
   // back to "default").
   useEffect(() => {
+    reportPhotosRef.current = reportPhotos;
     try {
       if (mode === "report") {
         window.localStorage.setItem(
@@ -181,7 +183,12 @@ export function CaptureScreen({
     const stillReferenced = itemSaves.some((item) =>
       item.photos.some((photo) => photo.localUuid === localUuid),
     );
-    if (!stillReferenced) await deleteQueuedPhoto(localUuid);
+    const stillInCurrentItem = reportPhotosRef.current.some(
+      (photo) => photo.localUuid === localUuid,
+    );
+    if (!stillReferenced && !stillInCurrentItem) {
+      await deleteQueuedPhoto(localUuid);
+    }
   }
 
   async function drainQueue() {
@@ -214,6 +221,16 @@ export function CaptureScreen({
             attempts: 0,
             nextAttemptAt: 0,
           });
+          reportPhotosRef.current = reportPhotosRef.current.map((p) =>
+            p.localUuid === photo.localUuid
+              ? {
+                  ...p,
+                  onedriveFileId: uploaded.onedriveFileId,
+                  filename: uploaded.filename,
+                }
+              : p,
+          );
+          setReportPhotos(reportPhotosRef.current);
           await cleanupUploadedPhoto(photo.localUuid);
         } catch {
           await putPhoto(await queueBackoff(photo));
@@ -322,10 +339,12 @@ export function CaptureScreen({
       await putPhoto(queued);
       setTotalTaken((n) => n + 1);
       if (mode === "report") {
-        setReportPhotos((arr) => [
-          ...arr,
+        const next = [
+          ...reportPhotosRef.current,
           { localUuid, width: shot.width, height: shot.height, takenAt },
-        ]);
+        ];
+        reportPhotosRef.current = next;
+        setReportPhotos(next);
       }
       await refreshPendingSync();
       void drainQueue();
@@ -337,19 +356,21 @@ export function CaptureScreen({
   }
 
   function startReport() {
+    reportPhotosRef.current = [];
     setReportPhotos([]);
     setMode("report");
   }
 
   function cancelReport() {
     // Photos stay in OneDrive; we just drop the collected array.
+    reportPhotosRef.current = [];
     setReportPhotos([]);
     setShowForm(false);
     setMode("default");
   }
 
   async function saveItem(area: string, comment: string) {
-    const photosForItem = reportPhotos;
+    const photosForItem = reportPhotosRef.current;
     const itemSave: QueuedItemSave = {
       localUuid: crypto.randomUUID(),
       inspectionId,
@@ -368,6 +389,7 @@ export function CaptureScreen({
     setInReportSaved((n) => n + photosForItem.length);
     const trimmed = area.trim();
     if (trimmed && !areas.includes(trimmed)) setAreas((a) => [...a, trimmed]);
+    reportPhotosRef.current = [];
     setReportPhotos([]);
     setShowForm(false);
     setMode("default");
