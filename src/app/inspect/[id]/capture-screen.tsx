@@ -13,6 +13,35 @@ type Mode = "default" | "report";
 
 const ACCENT = "#0072c6";
 
+type Draft = { mode: Mode; reportPhotos: ReportPhoto[] };
+
+function draftKey(inspectionId: string) {
+  return `upstream-inspection-draft:${inspectionId}`;
+}
+
+/**
+ * Photos are uploaded to OneDrive as soon as they're taken, but which ones
+ * belong to the action item currently being built only lives in this
+ * component's state until "Save" is pressed. On mobile that state is easily
+ * lost (tab discarded, browser closed) without ever touching the network, so
+ * it's mirrored into localStorage and restored on mount -- the photos were
+ * never at risk, just the grouping.
+ */
+function readDraft(inspectionId: string): Draft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(draftKey(inspectionId));
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as Draft;
+    if (draft.mode === "report" && Array.isArray(draft.reportPhotos)) {
+      return draft;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function CaptureScreen({
   inspectionId,
   propertyName,
@@ -29,17 +58,47 @@ export function CaptureScreen({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // Read once, up front, so the initial state of several fields below can
+  // share it without re-reading localStorage per field.
+  const [initialDraft] = useState(() => readDraft(inspectionId));
+
   const [camError, setCamError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>("default");
+  const [mode, setMode] = useState<Mode>(initialDraft?.mode ?? "default");
   const [busy, setBusy] = useState(false);
 
   const [totalTaken, setTotalTaken] = useState(0);
   const [inReportSaved, setInReportSaved] = useState(initialInReport);
-  const [reportPhotos, setReportPhotos] = useState<ReportPhoto[]>([]);
+  const [reportPhotos, setReportPhotos] = useState<ReportPhoto[]>(
+    initialDraft?.reportPhotos ?? [],
+  );
 
   const [showForm, setShowForm] = useState(false);
   const [areas, setAreas] = useState<string[]>(initialAreas);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(() => {
+    const n = initialDraft?.reportPhotos.length ?? 0;
+    return n > 0
+      ? `Continuing where you left off — ${n} photo${n === 1 ? "" : "s"} already added.`
+      : null;
+  });
+
+  // Mirror the in-progress item to localStorage so it survives a reload.
+  // Cleared once the item is saved or the report is cancelled (mode flips
+  // back to "default").
+  useEffect(() => {
+    try {
+      if (mode === "report") {
+        window.localStorage.setItem(
+          draftKey(inspectionId),
+          JSON.stringify({ mode, reportPhotos } satisfies Draft),
+        );
+      } else {
+        window.localStorage.removeItem(draftKey(inspectionId));
+      }
+    } catch {
+      // Storage unavailable (private browsing, quota) -- resuming just won't
+      // work this session; capture itself is unaffected.
+    }
+  }, [inspectionId, mode, reportPhotos]);
 
   // --- Camera lifecycle ---
   useEffect(() => {
