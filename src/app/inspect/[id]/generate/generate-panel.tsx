@@ -42,7 +42,7 @@ export function GeneratePanel({
     startSend(async () => {
       try {
         await sendForReview(inspectionId);
-        setSentNote("Report emailed to Dave for review.");
+        setSentNote("Review link emailed to Dave.");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn’t send the report.");
       }

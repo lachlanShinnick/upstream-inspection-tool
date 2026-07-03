@@ -2,16 +2,57 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
-import { downloadDriveItem, getGraphClient } from "@/lib/graph";
+import { polishComment } from "@/lib/commentPolish";
+import { getGraphClient } from "@/lib/graph";
 import { generateReport } from "@/lib/reportGeneration";
+import { mintOrReuseReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-
-const DOCX_MIME =
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function formatDateAU(iso: string): string {
   const [y, m, d] = iso.split("-");
   return `${Number(d)}/${m}/${y}`;
+}
+
+/** A reviewer's edit to one action item's location + comment. */
+export type ReviewEdit = { id: string; area: string; comment: string };
+
+/**
+ * Persist the reviewer's edits to each action item's location (area) and
+ * comment before the report is generated. Only rows belonging to this
+ * inspection are touched.
+ */
+export async function saveReview(
+  inspectionId: string,
+  edits: ReviewEdit[],
+): Promise<{ saved: true }> {
+  const session = await auth();
+  if (!session) throw new Error("Not signed in.");
+
+  const sb = supabaseAdmin();
+  for (const edit of edits) {
+    const area = edit.area.trim();
+    if (!area) throw new Error("Every item needs a location.");
+    const { error } = await sb
+      .from("action_items")
+      .update({ area, comment: edit.comment.trim() })
+      .eq("id", edit.id)
+      .eq("inspection_id", inspectionId);
+    if (error) throw new Error(`Couldn't save changes: ${error.message}`);
+  }
+
+  revalidatePath(`/inspect/${inspectionId}/generate`);
+  return { saved: true };
+}
+
+/**
+ * Ask OpenAI (o4-mini) to tidy one comment's grammar/professionalism, on demand
+ * from the review screen. Returns null when nothing better is available, so the
+ * UI can just keep the reviewer's text.
+ */
+export async function suggestComment(text: string): Promise<string | null> {
+  const session = await auth();
+  if (!session) throw new Error("Not signed in.");
+  return polishComment(text);
 }
 
 export async function runGenerate(
@@ -24,8 +65,8 @@ export async function runGenerate(
 }
 
 /**
- * Email Dave (the configured reviewer) that the generated report is ready, and
- * save a copy to the sender's Sent Items.
+ * Email Dave (the configured reviewer) a magic link to the unauthenticated
+ * review page for this inspection, and save a copy to the sender's Sent Items.
  */
 export async function sendForReview(
   inspectionId: string,
@@ -44,10 +85,7 @@ export async function sendForReview(
 
   const { data: inspection, error } = await supabaseAdmin()
     .from("inspections")
-    .select(
-      "property_name, inspection_date, onedrive_drive_id, generated_doc_onedrive_id",
-    )
-
+    .select("property_name, inspection_date, generated_doc_onedrive_id")
     .eq("id", inspectionId)
     .single();
   if (error || !inspection) throw new Error("Inspection not found.");
@@ -57,6 +95,14 @@ export async function sendForReview(
 
   const dateAU = formatDateAU(inspection.inspection_date);
   const subject = `Council Inspection Report Ready — ${inspection.property_name} — ${dateAU}`;
+
+  const token = await mintOrReuseReviewToken(inspectionId);
+  const appBaseUrl = process.env.APP_BASE_URL;
+  if (!appBaseUrl) {
+    throw new Error("Set APP_BASE_URL in .env.local to build the review link.");
+  }
+  const reviewUrl = new URL(`/review/${token}`, appBaseUrl).toString();
+
   const client = await getGraphClient();
   await client.api("/me/sendMail").post({
     message: {
@@ -68,7 +114,11 @@ export async function sendForReview(
       body: {
         contentType: "Text",
         content: `Hi,
-The council routine inspection report for ${inspection.property_name} (${dateAU}) has been generated and uploaded to the inspection folder in OneDrive.
+The council routine inspection report for ${inspection.property_name} (${dateAU}) is ready for your review.
+
+Review, edit and download it here: ${reviewUrl}
+
+This link doesn't require a Microsoft sign-in and works for 30 days.
 Thanks`,
       },
     },

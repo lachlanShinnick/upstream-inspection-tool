@@ -5,7 +5,6 @@ import ImageModule from "docxtemplater-image-module-free";
 import PizZip from "pizzip";
 import sharp from "sharp";
 import { auth } from "@/auth";
-import { polishComment } from "@/lib/commentPolish";
 import { downloadDriveItem, uploadFileToFolder } from "@/lib/graph";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -45,18 +44,6 @@ function formatDateAU(iso: string): string {
   return `${Number(d)}/${m}/${y}`;
 }
 
-/**
- * Comment shown in the report. When OpenAI returned a polished version, show the
- * inspector's original followed by the AI suggestion, separated by a blank line,
- * so the reviewer can pick whichever reads best and delete the other.
- * (linebreaks: true on Docxtemplater turns these "\n"s into real line breaks.)
- */
-function buildComment(original: string, polished: string | null): string {
-  const base = original.trim();
-  if (!polished) return base;
-  return `${base}\n\nSuggested revision:\n${polished}`;
-}
-
 /** Read intrinsic dimensions from a PNG header (signature image). */
 function pngSize(buf: Buffer): { width: number; height: number } {
   if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47) {
@@ -85,17 +72,20 @@ async function fitReportPhotoBox(buf: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-/** Download bytes; retry once before giving up. */
+type FetchBytes = (driveId: string, fileId: string) => Promise<Buffer>;
+
+/** Download bytes via `fetchBytes`; retry once before giving up. */
 async function downloadWithRetry(
+  fetchBytes: FetchBytes,
   driveId: string,
   fileId: string,
   label: string,
 ): Promise<Buffer> {
   try {
-    return await downloadDriveItem(driveId, fileId);
+    return await fetchBytes(driveId, fileId);
   } catch {
     try {
-      return await downloadDriveItem(driveId, fileId);
+      return await fetchBytes(driveId, fileId);
     } catch (second) {
       throw new Error(
         `Couldn't download ${label}: ${
@@ -126,12 +116,28 @@ function logDocxError(error: unknown) {
   }
 }
 
-export async function generateReport(
-  inspectionId: string,
-): Promise<{ docOnedriveId: string; docWebUrl: string }> {
-  const session = await auth();
-  if (!session) throw new Error("Not signed in.");
+export type RenderedReport = {
+  buffer: Buffer;
+  inspection: {
+    property_name: string;
+    inspection_date: string;
+    onedrive_drive_id: string;
+    onedrive_subfolder_id: string;
+  };
+};
 
+/**
+ * Build the report .docx buffer from an inspection's current action_items,
+ * photos and signature. Pure read + render — no auth/session dependency, no
+ * upload, no DB writes. `fetchBytes` lets the caller supply either the
+ * session-based or app-only Graph download function, so this same core can
+ * back both the inspector's authenticated generate flow and the reviewer's
+ * unauthenticated download route.
+ */
+export async function renderReportDocx(
+  inspectionId: string,
+  fetchBytes: FetchBytes,
+): Promise<RenderedReport> {
   const sb = supabaseAdmin();
 
   // 1. Inspection + inspector.
@@ -189,6 +195,7 @@ export async function generateReport(
   for (const p of photos) {
     if (!bytesByFileId.has(p.onedrive_file_id)) {
       const originalBytes = await downloadWithRetry(
+        fetchBytes,
         driveId,
         p.onedrive_file_id,
         `photo ${p.filename}`,
@@ -215,16 +222,8 @@ export async function generateReport(
   }
   const signatureBytes = Buffer.from(await sigBlob.arrayBuffer());
 
-  // 5. Polish each comment with OpenAI in parallel. Failures fall back to the
-  // original (polishComment returns null), so this never blocks generation.
-  const polishedByItem = new Map<string, string | null>();
-  await Promise.all(
-    items.map(async (item) => {
-      polishedByItem.set(item.id, await polishComment(item.comment ?? ""));
-    }),
-  );
-
-  // 6. Template data + a value->size map the image module reads in getSize.
+  // 5. Template data + a value->size map the image module reads in getSize.
+  // Comments are already reviewed/finalised in the app, so they're used as-is.
   const sizeByValue = new Map<unknown, { width: number; height: number }>();
 
   let nextPhotoNumber = 1;
@@ -234,7 +233,7 @@ export async function generateReport(
     return {
       number: i + 1,
       area: item.area,
-      comment: buildComment(item.comment ?? "", polishedByItem.get(item.id) ?? null),
+      comment: item.comment ?? "",
       image_refs: photoNumbers.join(", "),
       photos: itemPhotos.map((p, j) => {
         const reportImage = reportImageByFileId.get(p.onedrive_file_id)!;
@@ -273,7 +272,7 @@ export async function generateReport(
     signature: signatureBytes,
   };
 
-  // 7. Render the template.
+  // 6. Render the template.
   const imageModule = new ImageModule({
     centered: false,
     getImage: (tagValue) => tagValue as Buffer,
@@ -327,7 +326,35 @@ export async function generateReport(
     compression: "DEFLATE",
   }) as Buffer;
 
-  // 8. Upload the .docx into the inspection's dated subfolder.
+  return {
+    buffer: out,
+    inspection: {
+      property_name: inspection.property_name,
+      inspection_date: inspection.inspection_date,
+      onedrive_drive_id: driveId,
+      onedrive_subfolder_id: inspection.onedrive_subfolder_id,
+    },
+  };
+}
+
+/**
+ * Inspector-facing entrypoint: session-gated, renders via renderReportDocx,
+ * uploads the result into the inspection's dated OneDrive subfolder, and
+ * marks the inspection generated. Unchanged behavior from before the
+ * renderReportDocx extraction.
+ */
+export async function generateReport(
+  inspectionId: string,
+): Promise<{ docOnedriveId: string; docWebUrl: string }> {
+  const session = await auth();
+  if (!session) throw new Error("Not signed in.");
+
+  const { buffer, inspection } = await renderReportDocx(
+    inspectionId,
+    downloadDriveItem,
+  );
+
+  // Upload the .docx into the inspection's dated subfolder.
   const safeProperty = inspection.property_name.replace(/[\\/:*?"<>|]/g, "-");
   const generatedAt = new Date()
     .toISOString()
@@ -335,15 +362,15 @@ export async function generateReport(
     .replace(/\.\d{3}Z$/, "Z");
   const filename = `Council Inspection Report - ${safeProperty} - ${inspection.inspection_date} - ${generatedAt}.docx`;
   const uploaded = await uploadFileToFolder(
-    driveId,
+    inspection.onedrive_drive_id,
     inspection.onedrive_subfolder_id,
     filename,
-    out,
+    buffer,
     DOCX_MIME,
   );
 
-  // 9. Mark generated.
-  const { error: updateErr } = await sb
+  // Mark generated.
+  const { error: updateErr } = await supabaseAdmin()
     .from("inspections")
     .update({ status: "generated", generated_doc_onedrive_id: uploaded.id })
     .eq("id", inspectionId);

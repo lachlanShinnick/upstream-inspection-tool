@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 // Upstream Property's Entra tenant. Verified in the signIn callback as a
 // belt-and-braces check on top of the single-tenant Entra app registration.
-const UPSTREAM_TENANT_ID = "418f1be9-7142-48e3-ad19-cec645b844bf";
+export const UPSTREAM_TENANT_ID = "418f1be9-7142-48e3-ad19-cec645b844bf";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [

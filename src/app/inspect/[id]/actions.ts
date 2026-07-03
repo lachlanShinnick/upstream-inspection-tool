@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { auth } from "@/auth";
+import { polishComment } from "@/lib/commentPolish";
 import { uploadFileToFolder } from "@/lib/graph";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -93,6 +95,7 @@ export async function createReportedItem(
       inspection_id: inspectionId,
       area: trimmedArea,
       comment: comment.trim(),
+      original_comment: comment.trim(),
       sort_order: count ?? 0,
     })
     .select("id, area, comment")
@@ -118,6 +121,24 @@ export async function createReportedItem(
       throw new Error(`Failed to save photos: ${photoErr.message}`);
     }
   }
+
+  // Polish the wording in the background so the inspector's save doesn't wait
+  // on OpenAI. Stored on ai_comment for the reviewer page to show instantly;
+  // `comment` itself is untouched here (still the as-typed original) — it
+  // only changes when someone explicitly saves an edit from a review screen.
+  const itemId = item.id;
+  const original = item.comment;
+  after(async () => {
+    const polished = await polishComment(original);
+    if (!polished) return;
+    const { error } = await supabaseAdmin()
+      .from("action_items")
+      .update({ ai_comment: polished })
+      .eq("id", itemId);
+    if (error) {
+      console.error("[createReportedItem] failed to save ai_comment:", error.message);
+    }
+  });
 
   revalidatePath(`/inspect/${inspectionId}`);
   return item;

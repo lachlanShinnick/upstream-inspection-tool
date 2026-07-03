@@ -1,29 +1,22 @@
 import { auth } from "@/auth";
-import { downloadDriveItem } from "@/lib/graph";
+import { contentDisposition, safeFilenamePart } from "@/lib/downloadHeaders";
+import { downloadDriveItem, downloadDriveItemAsPdf } from "@/lib/graph";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-function safeFilenamePart(value: string): string {
-  return value.replace(/[\\/:*?"<>|]/g, "-").trim();
-}
-
-function contentDisposition(filename: string): string {
-  const fallback = filename.replace(/["\\]/g, "");
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(
-    filename,
-  )}`;
-}
-
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
   if (!session) {
     return new Response("Not signed in.", { status: 401 });
   }
+
+  const asPdf =
+    new URL(request.url).searchParams.get("format")?.toLowerCase() === "pdf";
 
   const { id } = await params;
   const { data: inspection, error } = await supabaseAdmin()
@@ -44,19 +37,39 @@ export async function GET(
     });
   }
 
-  const docBytes = await downloadDriveItem(
-    inspection.onedrive_drive_id,
-    inspection.generated_doc_onedrive_id,
-  );
-  const filename = `Council Inspection Report - ${safeFilenamePart(
+  const baseName = `Council Inspection Report - ${safeFilenamePart(
     inspection.property_name,
-  )} - ${inspection.inspection_date}.docx`;
+  )} - ${inspection.inspection_date}`;
 
-  return new Response(new Uint8Array(docBytes), {
-    headers: {
-      "Cache-Control": "no-store",
-      "Content-Disposition": contentDisposition(filename),
-      "Content-Type": DOCX_MIME,
-    },
-  });
+  try {
+    if (asPdf) {
+      const pdfBytes = await downloadDriveItemAsPdf(
+        inspection.onedrive_drive_id,
+        inspection.generated_doc_onedrive_id,
+      );
+      return new Response(new Uint8Array(pdfBytes), {
+        headers: {
+          "Cache-Control": "no-store",
+          "Content-Disposition": contentDisposition(`${baseName}.pdf`),
+          "Content-Type": "application/pdf",
+        },
+      });
+    }
+
+    const docBytes = await downloadDriveItem(
+      inspection.onedrive_drive_id,
+      inspection.generated_doc_onedrive_id,
+    );
+    return new Response(new Uint8Array(docBytes), {
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Disposition": contentDisposition(`${baseName}.docx`),
+        "Content-Type": DOCX_MIME,
+      },
+    });
+  } catch (e) {
+    const message =
+      e instanceof Error ? e.message : "Couldn't prepare the download.";
+    return new Response(message, { status: 502 });
+  }
 }

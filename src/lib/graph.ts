@@ -1,6 +1,6 @@
 import "isomorphic-fetch";
 import { Client } from "@microsoft/microsoft-graph-client";
-import { auth } from "@/auth";
+import { auth, UPSTREAM_TENANT_ID } from "@/auth";
 
 export type GraphFolder = { id: string; name: string };
 
@@ -36,20 +36,73 @@ async function getAccessToken(): Promise<string> {
   return accessToken;
 }
 
+let appOnlyTokenCache: { token: string; expiresAt: number } | null = null;
+
 /**
- * Upload a small (<4MB) file into a folder via a simple Graph PUT, using the
- * session access token directly. Raw fetch is the most reliable path for binary
- * bodies. Returns the created drive item's id, name and webUrl.
+ * Client-credentials (app-only) Graph token — no user session involved.
+ * Used by the /review/[token] routes, which have no signed-in reviewer to
+ * draw a delegated token from. Requires the Entra app registration to have
+ * been granted the Application permission Files.ReadWrite.All with admin
+ * consent (separate from the Delegated permissions used for sign-in) —
+ * without that grant, every app-only Graph call below will 403.
+ * Cached in-memory until ~60s before expiry; the cache only helps within a
+ * single warm process, so on serverless this is effectively "one token
+ * fetch per cold start," which is harmless.
  */
-export async function uploadFileToFolder(
+async function getAppOnlyAccessToken(): Promise<string> {
+  if (appOnlyTokenCache && Date.now() < appOnlyTokenCache.expiresAt - 60_000) {
+    return appOnlyTokenCache.token;
+  }
+
+  const res = await fetch(
+    `https://login.microsoftonline.com/${UPSTREAM_TENANT_ID}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: process.env.AUTH_MICROSOFT_ENTRA_ID_ID!,
+        client_secret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET!,
+        grant_type: "client_credentials",
+        scope: "https://graph.microsoft.com/.default",
+      }),
+    },
+  );
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(
+      data?.error_description ?? "App-only Graph authentication failed.",
+    );
+  }
+
+  appOnlyTokenCache = {
+    token: data.access_token as string,
+    expiresAt: Date.now() + Number(data.expires_in) * 1000,
+  };
+  return appOnlyTokenCache.token;
+}
+
+/**
+ * A Microsoft Graph client authenticated app-only (client credentials), for
+ * server code with no user session — e.g. the reviewer magic-link routes.
+ */
+export async function getAppOnlyGraphClient(): Promise<Client> {
+  const accessToken = await getAppOnlyAccessToken();
+  return Client.init({
+    authProvider: (done) => done(null, accessToken),
+  });
+}
+
+/** Upload a small (<4MB) file into a folder via a simple Graph PUT. Raw fetch
+ * is the most reliable path for binary bodies. Returns the created drive
+ * item's id, name and webUrl. */
+async function uploadFileToFolderWithToken(
+  accessToken: string,
   driveId: string,
   folderId: string,
   filename: string,
   body: Buffer | Uint8Array,
-  contentType = "application/octet-stream",
+  contentType: string,
 ): Promise<{ id: string; name: string; webUrl: string }> {
-  const accessToken = await getAccessToken();
-
   const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${folderId}:/${encodeURIComponent(
     filename,
   )}:/content`;
@@ -78,12 +131,47 @@ export async function uploadFileToFolder(
   };
 }
 
-/** Download a drive item's raw bytes (GET /content). */
-export async function downloadDriveItem(
+export async function uploadFileToFolder(
+  driveId: string,
+  folderId: string,
+  filename: string,
+  body: Buffer | Uint8Array,
+  contentType = "application/octet-stream",
+): Promise<{ id: string; name: string; webUrl: string }> {
+  return uploadFileToFolderWithToken(
+    await getAccessToken(),
+    driveId,
+    folderId,
+    filename,
+    body,
+    contentType,
+  );
+}
+
+/** Same as {@link uploadFileToFolder}, but using the app-only Graph client
+ * for callers with no user session (the reviewer magic-link routes). */
+export async function uploadFileToFolderAppOnly(
+  driveId: string,
+  folderId: string,
+  filename: string,
+  body: Buffer | Uint8Array,
+  contentType = "application/octet-stream",
+): Promise<{ id: string; name: string; webUrl: string }> {
+  return uploadFileToFolderWithToken(
+    await getAppOnlyAccessToken(),
+    driveId,
+    folderId,
+    filename,
+    body,
+    contentType,
+  );
+}
+
+async function downloadDriveItemWithToken(
+  accessToken: string,
   driveId: string,
   fileId: string,
 ): Promise<Buffer> {
-  const accessToken = await getAccessToken();
   const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${fileId}/content`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -100,6 +188,79 @@ export async function downloadDriveItem(
     );
   }
   return Buffer.from(await res.arrayBuffer());
+}
+
+/** Download a drive item's raw bytes (GET /content). */
+export async function downloadDriveItem(
+  driveId: string,
+  fileId: string,
+): Promise<Buffer> {
+  return downloadDriveItemWithToken(await getAccessToken(), driveId, fileId);
+}
+
+/** Same as {@link downloadDriveItem}, but using the app-only Graph client
+ * for callers with no user session (the reviewer magic-link routes). */
+export async function downloadDriveItemAppOnly(
+  driveId: string,
+  fileId: string,
+): Promise<Buffer> {
+  return downloadDriveItemWithToken(
+    await getAppOnlyAccessToken(),
+    driveId,
+    fileId,
+  );
+}
+
+async function downloadDriveItemAsPdfWithToken(
+  accessToken: string,
+  driveId: string,
+  fileId: string,
+): Promise<Buffer> {
+  const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${fileId}/content?format=pdf`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = (await res.json())?.error?.message ?? "";
+    } catch {
+      /* binary/empty body */
+    }
+    throw new Error(
+      `PDF conversion failed (${res.status})${detail ? `: ${detail}` : ""}.`,
+    );
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Download a drive item converted to PDF. OneDrive/SharePoint render the file
+ * server-side (`?format=pdf`), so a generated `.docx` becomes a PDF without any
+ * local conversion tooling.
+ */
+export async function downloadDriveItemAsPdf(
+  driveId: string,
+  fileId: string,
+): Promise<Buffer> {
+  return downloadDriveItemAsPdfWithToken(
+    await getAccessToken(),
+    driveId,
+    fileId,
+  );
+}
+
+/** Same as {@link downloadDriveItemAsPdf}, but using the app-only Graph
+ * client for callers with no user session (the reviewer magic-link routes). */
+export async function downloadDriveItemAsPdfAppOnly(
+  driveId: string,
+  fileId: string,
+): Promise<Buffer> {
+  return downloadDriveItemAsPdfWithToken(
+    await getAppOnlyAccessToken(),
+    driveId,
+    fileId,
+  );
 }
 
 /** The OneDrive web URL for a drive item, or null if it can't be fetched. */
