@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { auth, signOut } from "@/auth";
 import { getDriveItemWebUrl } from "@/lib/graph";
+import { formatPropertyName } from "@/lib/propertyName";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink, PrimaryButton } from "@/app/ui";
 
@@ -180,7 +181,7 @@ export default async function DashboardPage() {
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-[#111817] dark:text-zinc-50">
-                      {r.property_name}
+                      {formatPropertyName(r.property_name)}
                     </p>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
                       {formatDateAU(r.inspection_date)}

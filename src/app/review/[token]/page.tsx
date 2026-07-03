@@ -1,4 +1,5 @@
 import { Download, FileText } from "lucide-react";
+import { formatPropertyName } from "@/lib/propertyName";
 import { validateReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { Card, ReviewShell } from "@/app/review/ui";
@@ -72,7 +73,9 @@ export default async function ReviewPage({
 
   return (
     <ReviewShell
-      title={inspection?.property_name ?? "Inspection review"}
+      title={
+        inspection ? formatPropertyName(inspection.property_name) : "Inspection review"
+      }
       subtitle={
         inspection
           ? `Council routine inspection · ${formatDateAU(inspection.inspection_date)}`

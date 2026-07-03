@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { auth } from "@/auth";
+import { formatPropertyName } from "@/lib/propertyName";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink } from "@/app/ui";
 import { CaptureScreen } from "./capture-screen";
@@ -69,7 +70,7 @@ export default async function InspectionPage({
   return (
     <CaptureScreen
       inspectionId={inspection.id}
-      propertyName={inspection.property_name}
+      propertyName={formatPropertyName(inspection.property_name)}
       inspectionDate={inspection.inspection_date}
       initialAreas={areas}
       initialInReport={inReport}

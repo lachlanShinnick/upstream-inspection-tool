@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { polishComment } from "@/lib/commentPolish";
 import { getGraphClient } from "@/lib/graph";
+import { formatPropertyName } from "@/lib/propertyName";
 import { generateReport } from "@/lib/reportGeneration";
 import { mintOrReuseReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -94,7 +95,8 @@ export async function sendForReview(
   }
 
   const dateAU = formatDateAU(inspection.inspection_date);
-  const subject = `Council Inspection Report Ready — ${inspection.property_name} — ${dateAU}`;
+  const propertyName = formatPropertyName(inspection.property_name);
+  const subject = `Council Inspection Report Ready — ${propertyName} — ${dateAU}`;
 
   const token = await mintOrReuseReviewToken(inspectionId);
   const appBaseUrl = process.env.APP_BASE_URL;
@@ -114,7 +116,7 @@ export async function sendForReview(
       body: {
         contentType: "Text",
         content: `Hi,
-The council routine inspection report for ${inspection.property_name} (${dateAU}) is ready for your review.
+The council routine inspection report for ${propertyName} (${dateAU}) is ready for your review.
 
 Review, edit and download it here: ${reviewUrl}
 

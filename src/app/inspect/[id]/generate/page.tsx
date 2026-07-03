@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { ArrowLeft, Camera } from "lucide-react";
 import { auth } from "@/auth";
 import { getDriveItemWebUrl } from "@/lib/graph";
+import { formatPropertyName } from "@/lib/propertyName";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink } from "@/app/ui";
 import { GeneratePanel } from "./generate-panel";
@@ -91,7 +92,7 @@ export default async function GeneratePage({
   return (
     <AppShell
       eyebrow="Generate report"
-      title={inspection.property_name}
+      title={formatPropertyName(inspection.property_name)}
       subtitle={`Council routine inspection · ${formatDateAU(inspection.inspection_date)}`}
       actions={
         <>
@@ -112,7 +113,7 @@ export default async function GeneratePage({
             Summary
           </h2>
           <dl className="mt-4 space-y-3 text-sm">
-            <SummaryRow label="Property" value={inspection.property_name} />
+            <SummaryRow label="Property" value={formatPropertyName(inspection.property_name)} />
             <SummaryRow
               label="Date"
               value={formatDateAU(inspection.inspection_date)}

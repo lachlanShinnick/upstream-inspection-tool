@@ -6,6 +6,7 @@ import PizZip from "pizzip";
 import sharp from "sharp";
 import { auth } from "@/auth";
 import { downloadDriveItem, uploadFileToFolder } from "@/lib/graph";
+import { formatPropertyName } from "@/lib/propertyName";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const TEMPLATE_PATH = path.join(
@@ -149,6 +150,9 @@ export async function renderReportDocx(
     .eq("id", inspectionId)
     .single();
   if (insErr || !inspection) throw new Error("Inspection not found.");
+  // Folder names are filed as "Suburb, Street, Number"; the report and any
+  // downstream filenames should read as a normal address.
+  const displayPropertyName = formatPropertyName(inspection.property_name);
 
   const { data: user, error: userErr } = await sb
     .from("users")
@@ -262,7 +266,7 @@ export async function renderReportDocx(
   );
 
   const data = {
-    property_name: inspection.property_name,
+    property_name: displayPropertyName,
     inspection_date: formatDateAU(inspection.inspection_date),
     inspector_name: user.name,
     inspector_position: user.position ?? "",
@@ -329,7 +333,7 @@ export async function renderReportDocx(
   return {
     buffer: out,
     inspection: {
-      property_name: inspection.property_name,
+      property_name: displayPropertyName,
       inspection_date: inspection.inspection_date,
       onedrive_drive_id: driveId,
       onedrive_subfolder_id: inspection.onedrive_subfolder_id,

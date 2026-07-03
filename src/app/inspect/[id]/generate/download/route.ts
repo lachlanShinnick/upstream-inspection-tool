@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { contentDisposition, safeFilenamePart } from "@/lib/downloadHeaders";
 import { downloadDriveItem, downloadDriveItemAsPdf } from "@/lib/graph";
+import { formatPropertyName } from "@/lib/propertyName";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const DOCX_MIME =
@@ -38,7 +39,7 @@ export async function GET(
   }
 
   const baseName = `Council Inspection Report - ${safeFilenamePart(
-    inspection.property_name,
+    formatPropertyName(inspection.property_name),
   )} - ${inspection.inspection_date}`;
 
   try {
