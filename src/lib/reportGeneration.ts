@@ -28,8 +28,9 @@ const REPORT_PHOTO_SCALE = 3;
 const SIGNATURE_MAX_WIDTH = 180;
 const SIGNATURE_MAX_HEIGHT = 45;
 const INSPECTOR_COMPANY = "Upstream Property Solutions";
-// The report_photos grid fills left-to-right then down (a real table, one
-// row per group), so this is photos-per-row, not a column count.
+// The report_photos grid fills left-to-right then down. The template renders
+// one three-cell table row per photo_rows entry (cells tagged c1/c2/c3), so
+// this must stay in sync with the number of cN cells in the template.
 const REPORT_PHOTOS_PER_ROW = 3;
 
 type PhotoRow = {
@@ -270,10 +271,16 @@ export async function renderReportDocx(
 
   // Grouped into fixed-size rows for the template's grid table, which loops
   // row-by-row (left-to-right, then down) rather than Word's column-major
-  // multi-column flow.
-  const photo_rows: (typeof report_photos)[] = [];
+  // multi-column flow. Each row maps photos to cell tags c1..cN; a missing
+  // cell (last partial row) renders as an empty grid cell.
+  type ReportPhoto = (typeof report_photos)[number];
+  const photo_rows: Record<string, ReportPhoto>[] = [];
   for (let i = 0; i < report_photos.length; i += REPORT_PHOTOS_PER_ROW) {
-    photo_rows.push(report_photos.slice(i, i + REPORT_PHOTOS_PER_ROW));
+    const row: Record<string, ReportPhoto> = {};
+    report_photos.slice(i, i + REPORT_PHOTOS_PER_ROW).forEach((photo, j) => {
+      row[`c${j + 1}`] = photo;
+    });
+    photo_rows.push(row);
   }
 
   const data = {
