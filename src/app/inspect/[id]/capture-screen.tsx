@@ -2,21 +2,26 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Camera, Check, ClipboardList, X } from "lucide-react";
+import { ArrowLeft, Camera, Check, ClipboardList, NotebookPen, X } from "lucide-react";
 import {
+  createIncidentNote,
   createReportedItem,
   uploadInspectionPhoto,
   type ReportPhoto,
 } from "./actions";
 import {
   deleteItemSave,
+  deleteNoteSave,
   deletePhoto as deleteQueuedPhoto,
   getPhoto,
   listItemSaves,
+  listNoteSaves,
   listPhotos,
   putItemSave,
+  putNoteSave,
   putPhoto,
   type QueuedItemSave,
+  type QueuedNoteSave,
   type QueuedPhoto,
 } from "@/lib/offline/db";
 
@@ -59,12 +64,18 @@ export function CaptureScreen({
   inspectionDate,
   initialAreas,
   initialInReport,
+  isIncident = false,
+  initialNoteCount = 0,
 }: {
   inspectionId: string;
   propertyName: string;
   inspectionDate: string;
   initialAreas: string[];
   initialInReport: number;
+  /** Incident reports: photos are standalone entries (area + description)
+   *  rather than action items, and narrative notes can be added. */
+  isIncident?: boolean;
+  initialNoteCount?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -87,6 +98,8 @@ export function CaptureScreen({
   );
 
   const [showForm, setShowForm] = useState(false);
+  const [showNoteForm, setShowNoteForm] = useState(false);
+  const [noteCount, setNoteCount] = useState(initialNoteCount);
   const [areas, setAreas] = useState<string[]>(initialAreas);
   const [toast, setToast] = useState<string | null>(() => {
     const n = initialDraft?.reportPhotos.length ?? 0;
@@ -157,10 +170,15 @@ export function CaptureScreen({
 
   async function refreshPendingSync() {
     try {
-      const [photos, items] = await Promise.all([listPhotos(), listItemSaves()]);
+      const [photos, items, notes] = await Promise.all([
+        listPhotos(),
+        listItemSaves(),
+        listNoteSaves(),
+      ]);
       setPendingSync(
         photos.filter((p) => p.state !== "uploaded" || p.blob).length +
-          items.length,
+          items.length +
+          notes.length,
       );
     } catch {
       setPendingSync(0);
@@ -270,6 +288,24 @@ export function CaptureScreen({
           setToast("Action item synced.");
         } catch {
           await putItemSave(await queueBackoff(itemSave));
+        }
+      }
+
+      const noteSaves = await listNoteSaves();
+      for (const noteSave of noteSaves) {
+        if (noteSave.inspectionId !== inspectionId || noteSave.nextAttemptAt > now) {
+          continue;
+        }
+        try {
+          await createIncidentNote(
+            noteSave.inspectionId,
+            noteSave.localUuid,
+            noteSave.text,
+          );
+          await deleteNoteSave(noteSave.localUuid);
+          setToast("Note synced.");
+        } catch {
+          await putNoteSave(await queueBackoff(noteSave));
         }
       }
     } finally {
@@ -394,7 +430,7 @@ export function CaptureScreen({
     setShowForm(false);
     setMode("default");
     setToast(
-      `Action item queued with ${photosForItem.length} photo${
+      `${isIncident ? "Photo entry" : "Action item"} queued with ${photosForItem.length} photo${
         photosForItem.length === 1 ? "" : "s"
       }.`,
     );
@@ -402,10 +438,30 @@ export function CaptureScreen({
     void drainQueue();
   }
 
+  async function saveNote(text: string) {
+    const noteSave: QueuedNoteSave = {
+      localUuid: crypto.randomUUID(),
+      inspectionId,
+      text,
+      attempts: 0,
+      nextAttemptAt: 0,
+    };
+    await putNoteSave(noteSave);
+    setNoteCount((n) => n + 1);
+    setShowNoteForm(false);
+    setToast("Note added.");
+    await refreshPendingSync();
+    void drainQueue();
+  }
+
+  const entryNoun = isIncident ? "photo entry" : "action item";
   const headerMain =
     mode === "report"
-      ? `${reportPhotos.length} photo${reportPhotos.length === 1 ? "" : "s"} for this action item`
+      ? `${reportPhotos.length} photo${reportPhotos.length === 1 ? "" : "s"} for this ${entryNoun}`
       : `${totalTaken} photo${totalTaken === 1 ? "" : "s"} taken`;
+  const headerCounts = isIncident
+    ? `${noteCount} note${noteCount === 1 ? "" : "s"} · ${inReportSaved} in report`
+    : `${totalTaken} photos · ${inReportSaved} in report`;
 
   return (
     <div className="relative flex h-dvh flex-col bg-black text-white">
@@ -429,7 +485,7 @@ export function CaptureScreen({
             <div className="rounded-lg bg-black/28 px-3 py-2 text-right backdrop-blur-md">
               <p className="text-sm font-semibold">{headerMain}</p>
               <p className="text-xs text-white/58">
-                {totalTaken} photos · {inReportSaved} in report
+                {headerCounts}
                 {pendingSync > 0 ? ` · ${pendingSync} syncing` : " · synced"}
               </p>
             </div>
@@ -463,14 +519,14 @@ export function CaptureScreen({
       <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/58 to-transparent px-4 pb-7 pt-14 sm:px-6">
         {mode === "report" && (
           <p className="mx-auto mb-3 w-fit rounded-md bg-white/12 px-3 py-1.5 text-center text-xs font-semibold text-white/82 backdrop-blur">
-            Collecting photos for a new action item
+            Collecting photos for a new {entryNoun}
           </p>
         )}
 
         <div className="mx-auto flex max-w-xl items-center justify-between gap-3">
           {/* Left slot */}
           <div className="w-28">
-            {mode === "report" && (
+            {mode === "report" ? (
               <button
                 type="button"
                 onClick={cancelReport}
@@ -479,6 +535,17 @@ export function CaptureScreen({
                 <X className="h-4 w-4" aria-hidden="true" />
                 Cancel
               </button>
+            ) : (
+              isIncident && (
+                <button
+                  type="button"
+                  onClick={() => setShowNoteForm(true)}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-white/12 px-3 py-2 text-sm font-semibold text-white backdrop-blur hover:bg-white/22"
+                >
+                  <NotebookPen className="h-4 w-4" aria-hidden="true" />
+                  <span className="leading-tight">Note</span>
+                </button>
+              )
             )}
           </div>
 
@@ -525,15 +592,24 @@ export function CaptureScreen({
         </div>
       </div>
 
-      {/* Slide-up form */}
+      {/* Slide-up forms */}
       <ItemForm
         key={showForm ? "item-form-open" : "item-form-closed"}
         open={showForm}
         areas={areas}
         photoCount={reportPhotos.length}
+        isIncident={isIncident}
         onCancel={() => setShowForm(false)}
         onSave={saveItem}
       />
+      {isIncident && (
+        <NoteForm
+          key={showNoteForm ? "note-form-open" : "note-form-closed"}
+          open={showNoteForm}
+          onCancel={() => setShowNoteForm(false)}
+          onSave={saveNote}
+        />
+      )}
 
       {/* Toast */}
       {toast && (
@@ -551,12 +627,14 @@ function ItemForm({
   open,
   areas,
   photoCount,
+  isIncident,
   onCancel,
   onSave,
 }: {
   open: boolean;
   areas: string[];
   photoCount: number;
+  isIncident: boolean;
   onCancel: () => void;
   onSave: (area: string, comment: string) => Promise<void>;
 }) {
@@ -587,7 +665,9 @@ function ItemForm({
       }`}
     >
       <div className="mx-auto w-full max-w-xl">
-        <h2 className="text-xl font-semibold tracking-normal">New action item</h2>
+        <h2 className="text-xl font-semibold tracking-normal">
+          {isIncident ? "New photo entry" : "New action item"}
+        </h2>
         <p className="mt-1 text-sm text-zinc-500">
           {photoCount} photo{photoCount === 1 ? "" : "s"} attached
         </p>
@@ -614,12 +694,16 @@ function ItemForm({
           </div>
         )}
 
-        <label className="mt-4 block text-sm font-medium">Comment</label>
+        <label className="mt-4 block text-sm font-medium">
+          {isIncident ? "Description" : "Comment"}
+        </label>
         <textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           rows={3}
-          placeholder="Describe the action needed…"
+          placeholder={
+            isIncident ? "Describe what the photo shows…" : "Describe the action needed…"
+          }
           className="mt-1 w-full rounded-lg border border-black/10 bg-[#fbfcfb] px-4 py-3 text-base outline-none transition-colors placeholder:text-zinc-400 focus:border-[#0072c6] focus:bg-white dark:border-white/15 dark:bg-zinc-950"
         />
 
@@ -642,6 +726,82 @@ function ItemForm({
             className="flex-1 rounded-lg px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#0072c6]/20 disabled:opacity-60"
           >
             {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Incident reports: slide-up form for one narrative note. Notes flow through
+ *  the first-page log in the order they're added. */
+function NoteForm({
+  open,
+  onCancel,
+  onSave,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onSave: (text: string) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!text.trim()) {
+      setError("Enter a note.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(text.trim());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn’t save.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className={`absolute inset-x-0 bottom-0 z-30 rounded-t-lg bg-white p-5 text-black shadow-2xl transition-transform duration-300 sm:p-6 dark:bg-zinc-900 dark:text-white ${
+        open ? "translate-y-0" : "pointer-events-none translate-y-full"
+      }`}
+    >
+      <div className="mx-auto w-full max-w-xl">
+        <h2 className="text-xl font-semibold tracking-normal">Add note</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Notes appear in the incident log in the order they’re added.
+        </p>
+
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={4}
+          placeholder="e.g. Arrived to meet plumbers on site to carry out walk-through of premises…"
+          className="mt-4 w-full rounded-lg border border-black/10 bg-[#fbfcfb] px-4 py-3 text-base outline-none transition-colors placeholder:text-zinc-400 focus:border-[#0072c6] focus:bg-white dark:border-white/15 dark:bg-zinc-950"
+        />
+
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="flex-1 rounded-lg border border-black/15 px-5 py-3 text-sm font-semibold dark:border-white/20"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={saving}
+            style={{ backgroundColor: ACCENT }}
+            className="flex-1 rounded-lg px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-[#0072c6]/20 disabled:opacity-60"
+          >
+            {saving ? "Saving…" : "Add note"}
           </button>
         </div>
       </div>

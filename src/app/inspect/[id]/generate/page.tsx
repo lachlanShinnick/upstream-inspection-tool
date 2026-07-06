@@ -83,15 +83,27 @@ export default async function GeneratePage({
     pendingPhotoCount = pendingCount ?? 0;
   }
 
+  const isIncident = inspection.report_type === "incident";
+  let noteCount = 0;
+  if (isIncident) {
+    const { count } = await sb
+      .from("incident_notes")
+      .select("id", { count: "exact", head: true })
+      .eq("inspection_id", id);
+    noteCount = count ?? 0;
+  }
+
   const alreadyGenerated = inspection.status === "generated";
   const report = reportTypeInfo(inspection.report_type);
-  const canGenerate = itemCount > 0 && pendingPhotoCount === 0;
+  const hasContent = isIncident ? itemCount > 0 || noteCount > 0 : itemCount > 0;
+  const canGenerate = hasContent && pendingPhotoCount === 0;
 
-  const disabledReason =
-    itemCount === 0
-      ? "Add at least one action item before generating."
-      : pendingPhotoCount > 0
-        ? `${pendingPhotoCount} photo${pendingPhotoCount === 1 ? "" : "s"} still syncing. Leave the capture screen open until syncing finishes.`
+  const disabledReason = !hasContent
+    ? isIncident
+      ? "Add at least one note or photo before generating."
+      : "Add at least one action item before generating."
+    : pendingPhotoCount > 0
+      ? `${pendingPhotoCount} photo${pendingPhotoCount === 1 ? "" : "s"} still syncing. Leave the capture screen open until syncing finishes.`
       : null;
 
   // If a doc already exists, resolve its web URL for the download link.
@@ -133,7 +145,11 @@ export default async function GeneratePage({
               label="Date"
               value={formatDateAU(inspection.inspection_date)}
             />
-            <SummaryRow label="Action items" value={String(itemCount)} />
+            {isIncident ? (
+              <SummaryRow label="Notes" value={String(noteCount)} />
+            ) : (
+              <SummaryRow label="Action items" value={String(itemCount)} />
+            )}
             <SummaryRow label="Photos" value={String(photoCount)} />
             <SummaryRow
               label="Sync"

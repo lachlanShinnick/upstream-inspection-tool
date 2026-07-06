@@ -19,7 +19,7 @@ export default async function InspectionPage({
 
   const { data: inspection } = await sb
     .from("inspections")
-    .select("id, property_name, inspection_date, status")
+    .select("id, property_name, inspection_date, status, report_type")
     .eq("id", id)
     .maybeSingle();
 
@@ -67,6 +67,16 @@ export default async function InspectionPage({
     inReport = count ?? 0;
   }
 
+  const isIncident = inspection.report_type === "incident";
+  let noteCount = 0;
+  if (isIncident) {
+    const { count } = await sb
+      .from("incident_notes")
+      .select("id", { count: "exact", head: true })
+      .eq("inspection_id", id);
+    noteCount = count ?? 0;
+  }
+
   return (
     <CaptureScreen
       inspectionId={inspection.id}
@@ -74,6 +84,8 @@ export default async function InspectionPage({
       inspectionDate={inspection.inspection_date}
       initialAreas={areas}
       initialInReport={inReport}
+      isIncident={isIncident}
+      initialNoteCount={noteCount}
     />
   );
 }

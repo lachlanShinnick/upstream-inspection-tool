@@ -188,6 +188,56 @@ export async function createReportedItem(
 }
 
 /**
+ * Persist one incident-report narrative note. Idempotent by local_uuid so the
+ * offline queue can retry safely, mirroring createReportedItem.
+ */
+export async function createIncidentNote(
+  inspectionId: string,
+  localUuid: string,
+  text: string,
+): Promise<{ id: string; text: string }> {
+  const session = await auth();
+  if (!session) throw new Error("Not signed in.");
+  if (!localUuid) throw new Error("Missing local note id.");
+
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("Note text is required.");
+
+  const sb = supabaseAdmin();
+
+  const { data: existing } = await sb
+    .from("incident_notes")
+    .select("id, text")
+    .eq("local_uuid", localUuid)
+    .maybeSingle();
+  if (existing) return existing;
+
+  // sort_order = position at the end of the current list.
+  const { count } = await sb
+    .from("incident_notes")
+    .select("id", { count: "exact", head: true })
+    .eq("inspection_id", inspectionId);
+
+  const { data: inserted, error } = await sb
+    .from("incident_notes")
+    .insert({
+      inspection_id: inspectionId,
+      local_uuid: localUuid,
+      text: trimmed,
+      original_text: trimmed,
+      sort_order: count ?? 0,
+    })
+    .select("id, text")
+    .single();
+  if (error || !inserted) {
+    throw new Error(`Failed to save note: ${error?.message ?? "unknown"}`);
+  }
+
+  revalidatePath(`/inspect/${inspectionId}`);
+  return inserted;
+}
+
+/**
  * Remove a photo from a report item — deletes the Supabase row only. The
  * OneDrive file is intentionally left in place (Upstream owns the source files).
  */

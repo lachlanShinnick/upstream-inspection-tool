@@ -16,6 +16,13 @@ export type ReviewItem = {
   photos: ReviewPhoto[];
 };
 
+/** Incident reports only: one narrative note from the first-page log. */
+export type ReviewNote = {
+  id: string;
+  text: string;
+  original_text: string | null;
+};
+
 type Source = "original" | "ai" | "custom";
 
 /**
@@ -35,9 +42,13 @@ function sourceOf(
 export function ReviewEditor({
   token,
   items,
+  notes = [],
+  isIncident = false,
 }: {
   token: string;
   items: ReviewItem[];
+  notes?: ReviewNote[];
+  isIncident?: boolean;
 }) {
   const [edits, setEdits] = useState(
     () =>
@@ -57,6 +68,9 @@ export function ReviewEditor({
   );
   const [aiText, setAiText] = useState(
     () => new Map(items.map((item) => [item.id, item.ai_comment])),
+  );
+  const [noteEdits, setNoteEdits] = useState(
+    () => new Map(notes.map((note) => [note.id, note.text])),
   );
   const [regenerating, setRegenerating] = useState<Set<string>>(new Set());
   const [saving, startSave] = useTransition();
@@ -105,13 +119,19 @@ export function ReviewEditor({
     }
   }
 
+  function updateNote(id: string, value: string) {
+    setNoteEdits((prev) => new Map(prev).set(id, value));
+    setSavedNote(null);
+  }
+
   function save() {
     setError(null);
     setSavedNote(null);
     startSave(async () => {
       try {
         const payload = Array.from(edits, ([id, edit]) => ({ id, ...edit }));
-        await saveReviewByToken(token, payload);
+        const notePayload = Array.from(noteEdits, ([id, text]) => ({ id, text }));
+        await saveReviewByToken(token, payload, notePayload);
         setSavedNote("Changes saved.");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't save changes.");
@@ -130,6 +150,32 @@ export function ReviewEditor({
         </p>
       )}
 
+      {notes.length > 0 && (
+        <Card>
+          <h2 className="text-sm font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+            Incident log
+          </h2>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            These notes flow through the report’s first page in order.
+          </p>
+          <div className="mt-4 space-y-3">
+            {notes.map((note, i) => (
+              <div key={note.id}>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+                  Note {i + 1}
+                </p>
+                <textarea
+                  value={noteEdits.get(note.id) ?? note.text}
+                  onChange={(e) => updateNote(note.id, e.target.value)}
+                  rows={3}
+                  className="mt-1 block w-full rounded-lg border border-black/[.12] bg-white px-3 py-2 text-sm leading-6 text-[#111817] dark:border-white/[.18] dark:bg-zinc-900 dark:text-zinc-50"
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {items.map((item, i) => {
         const edit = edits.get(item.id) ?? { area: item.area, comment: item.comment };
         const ai = aiText.get(item.id) ?? null;
@@ -140,7 +186,7 @@ export function ReviewEditor({
           <Card key={item.id}>
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-sm font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-                Item {i + 1}
+                {isIncident ? "Photo" : "Item"} {i + 1}
               </h2>
             </div>
 
@@ -171,7 +217,7 @@ export function ReviewEditor({
             <div className="mt-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-                  Comment
+                  {isIncident ? "Description" : "Comment"}
                 </p>
                 <div
                   role="radiogroup"

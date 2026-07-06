@@ -17,6 +17,12 @@ export const REPORT_TYPES = {
     title: "Outgoing Inspection Report",
     folderSuffix: "Outgoing Inspection Report",
   },
+  incident: {
+    label: "Incident Report",
+    newLabel: "New Incident Report",
+    title: "Incident Report",
+    folderSuffix: "Incident Report",
+  },
 } as const;
 
 export type ReportType = keyof typeof REPORT_TYPES;

@@ -7,13 +7,25 @@ import sharp from "sharp";
 import { auth } from "@/auth";
 import { downloadDriveItem, uploadFileToFolder } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
-import { reportTypeInfo } from "@/lib/reportTypes";
+import {
+  parseReportType,
+  reportTypeInfo,
+  type ReportType,
+} from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-const TEMPLATE_PATH = path.join(
-  process.cwd(),
-  "src/templates/council-inspection.docx",
-);
+// council/routine/outgoing share one layout (only the title differs);
+// incident has its own template (notes log + standalone photo blocks).
+const TEMPLATE_BY_TYPE: Record<ReportType, string> = {
+  council: "council-inspection.docx",
+  routine: "council-inspection.docx",
+  outgoing: "council-inspection.docx",
+  incident: "incident-report.docx",
+};
+
+function templatePath(reportType: ReportType): string {
+  return path.join(process.cwd(), "src/templates", TEMPLATE_BY_TYPE[reportType]);
+}
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 // Display size (px) of each photo in the Word report. The photo cell in the
@@ -159,7 +171,9 @@ export async function renderReportDocx(
   // Folder names are filed as "Suburb, Street, Number"; the report and any
   // downstream filenames should read as a normal address.
   const displayPropertyName = formatPropertyName(inspection.property_name);
+  const reportType = parseReportType(inspection.report_type);
   const report = reportTypeInfo(inspection.report_type);
+  const isIncident = reportType === "incident";
 
   const { data: user, error: userErr } = await sb
     .from("users")
@@ -176,16 +190,34 @@ export async function renderReportDocx(
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
   if (itemErr) throw new Error(`Failed to load action items: ${itemErr.message}`);
-  if (!items || items.length === 0) {
+
+  // Incident reports: the narrative notes for the first-page log. For an
+  // incident, "action items" are really per-entry photo groups, so either
+  // notes or photo entries make the report non-empty.
+  let notes: { text: string }[] = [];
+  if (isIncident) {
+    const { data: noteData, error: noteErr } = await sb
+      .from("incident_notes")
+      .select("text")
+      .eq("inspection_id", inspectionId)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (noteErr) throw new Error(`Failed to load notes: ${noteErr.message}`);
+    notes = (noteData ?? []).map((n) => ({ text: n.text ?? "" }));
+    if (notes.length === 0 && (!items || items.length === 0)) {
+      throw new Error("Add at least one note or photo before generating.");
+    }
+  } else if (!items || items.length === 0) {
     throw new Error("Add at least one action item before generating.");
   }
+  const itemList = items ?? [];
 
   const { data: photoData, error: photoErr } = await sb
     .from("photos")
     .select("id, action_item_id, onedrive_file_id, filename, width, height, taken_at")
     .in(
       "action_item_id",
-      items.map((i) => i.id),
+      itemList.map((i) => i.id),
     )
     .order("taken_at", { ascending: true });
   if (photoErr) throw new Error(`Failed to load photos: ${photoErr.message}`);
@@ -245,7 +277,7 @@ export async function renderReportDocx(
   const sizeByValue = new Map<unknown, { width: number; height: number }>();
 
   let nextPhotoNumber = 1;
-  const action_items = items.map((item, i) => {
+  const action_items = itemList.map((item, i) => {
     const itemPhotos = photosByItem.get(item.id) ?? [];
     const photoNumbers = itemPhotos.map(() => nextPhotoNumber++);
     return {
@@ -300,7 +332,10 @@ export async function renderReportDocx(
     inspector_name: user.name,
     inspector_position: user.position ?? "",
     inspector_company: INSPECTOR_COMPANY,
-    action_items,
+    // The incident template swaps the action-items table for the first-page
+    // narrative log; its photo pages use the exact photo_rows grid the other
+    // report templates share.
+    ...(isIncident ? { notes } : { action_items }),
     photo_rows,
     signature: signatureBytes,
   };
@@ -335,7 +370,7 @@ export async function renderReportDocx(
     },
   });
 
-  const templateBuffer = await readFile(TEMPLATE_PATH);
+  const templateBuffer = await readFile(templatePath(reportType));
   const zip = new PizZip(templateBuffer);
   const doc = new Docxtemplater(zip, {
     modules: [imageModule],

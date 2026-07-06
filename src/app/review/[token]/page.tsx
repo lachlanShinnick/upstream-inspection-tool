@@ -4,7 +4,7 @@ import { reportTypeInfo } from "@/lib/reportTypes";
 import { validateReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { Card, ReviewShell } from "@/app/review/ui";
-import { ReviewEditor, type ReviewItem } from "./review-editor";
+import { ReviewEditor, type ReviewItem, type ReviewNote } from "./review-editor";
 
 function formatDateAU(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -39,12 +39,29 @@ export default async function ReviewPage({
     .eq("id", scope.inspectionId)
     .single();
 
+  const isIncident = inspection?.report_type === "incident";
+
   const { data: items } = await sb
     .from("action_items")
     .select("id, area, comment, original_comment, ai_comment, sort_order")
     .eq("inspection_id", scope.inspectionId)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
+
+  let reviewNotes: ReviewNote[] = [];
+  if (isIncident) {
+    const { data: noteData } = await sb
+      .from("incident_notes")
+      .select("id, text, original_text")
+      .eq("inspection_id", scope.inspectionId)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+    reviewNotes = (noteData ?? []).map((n) => ({
+      id: n.id,
+      text: n.text ?? "",
+      original_text: n.original_text,
+    }));
+  }
 
   const itemIds = (items ?? []).map((item) => item.id);
   const { data: photos } =
@@ -104,14 +121,21 @@ export default async function ReviewPage({
         </>
       }
     >
-      {reviewItems.length === 0 ? (
+      {reviewItems.length === 0 && reviewNotes.length === 0 ? (
         <Card>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            No action items on this inspection yet.
+            {isIncident
+              ? "No notes or photos on this incident report yet."
+              : "No action items on this inspection yet."}
           </p>
         </Card>
       ) : (
-        <ReviewEditor token={token} items={reviewItems} />
+        <ReviewEditor
+          token={token}
+          items={reviewItems}
+          notes={reviewNotes}
+          isIncident={isIncident}
+        />
       )}
     </ReviewShell>
   );

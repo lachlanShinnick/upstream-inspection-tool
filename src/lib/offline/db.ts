@@ -36,10 +36,21 @@ export type QueuedItemSave = {
   nextAttemptAt: number;
 };
 
+/** An incident-report narrative note awaiting sync (incident reports only). */
+export type QueuedNoteSave = {
+  localUuid: string;
+  inspectionId: string;
+  text: string;
+  attempts: number;
+  nextAttemptAt: number;
+};
+
 const DB_NAME = "upstream-offline";
-const DB_VERSION = 1;
+// v2 adds the note-saves store for incident reports.
+const DB_VERSION = 2;
 const PHOTOS = "photos";
 const ITEMS = "item-saves";
+const NOTES = "note-saves";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -58,6 +69,9 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(ITEMS)) {
         db.createObjectStore(ITEMS, { keyPath: "localUuid" });
+      }
+      if (!db.objectStoreNames.contains(NOTES)) {
+        db.createObjectStore(NOTES, { keyPath: "localUuid" });
       }
     };
     req.onsuccess = () => {
@@ -119,6 +133,18 @@ export async function deleteItemSave(localUuid: string): Promise<void> {
 
 export async function listItemSaves(): Promise<QueuedItemSave[]> {
   return requestToPromise((await store(ITEMS, "readonly")).getAll());
+}
+
+export async function putNoteSave(record: QueuedNoteSave): Promise<void> {
+  await requestToPromise((await store(NOTES, "readwrite")).put(record));
+}
+
+export async function deleteNoteSave(localUuid: string): Promise<void> {
+  await requestToPromise((await store(NOTES, "readwrite")).delete(localUuid));
+}
+
+export async function listNoteSaves(): Promise<QueuedNoteSave[]> {
+  return requestToPromise((await store(NOTES, "readonly")).getAll());
 }
 
 /** True if IndexedDB can actually be opened in this browsing context. */
