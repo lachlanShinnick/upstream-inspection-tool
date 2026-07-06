@@ -233,6 +233,21 @@ export async function createIncidentNote(
     throw new Error(`Failed to save note: ${error?.message ?? "unknown"}`);
   }
 
+  // Polish the wording in the background, mirroring createReportedItem: stored
+  // on ai_text for the reviewer page, while `text` stays as typed.
+  const noteId = inserted.id;
+  after(async () => {
+    const polished = await polishComment(trimmed);
+    if (!polished) return;
+    const { error: aiErr } = await supabaseAdmin()
+      .from("incident_notes")
+      .update({ ai_text: polished })
+      .eq("id", noteId);
+    if (aiErr) {
+      console.error("[createIncidentNote] failed to save ai_text:", aiErr.message);
+    }
+  });
+
   revalidatePath(`/inspect/${inspectionId}`);
   return inserted;
 }

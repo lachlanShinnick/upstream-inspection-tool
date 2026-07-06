@@ -77,3 +77,25 @@ export async function regenerateSuggestion(
 
   return polished;
 }
+
+/** Same as {@link regenerateSuggestion}, for an incident-report note. */
+export async function regenerateNoteSuggestion(
+  token: string,
+  noteId: string,
+  text: string,
+): Promise<string | null> {
+  const scope = await validateReviewToken(token);
+  if (!scope) throw new Error("This review link has expired.");
+
+  const polished = await polishComment(text);
+  if (!polished) return null;
+
+  const { error } = await supabaseAdmin()
+    .from("incident_notes")
+    .update({ ai_text: polished })
+    .eq("id", noteId)
+    .eq("inspection_id", scope.inspectionId);
+  if (error) throw new Error(`Couldn't save suggestion: ${error.message}`);
+
+  return polished;
+}

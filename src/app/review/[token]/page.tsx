@@ -52,7 +52,7 @@ export default async function ReviewPage({
   if (isIncident) {
     const { data: noteData } = await sb
       .from("incident_notes")
-      .select("id, text, original_text")
+      .select("id, text, original_text, ai_text")
       .eq("inspection_id", scope.inspectionId)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true });
@@ -60,6 +60,7 @@ export default async function ReviewPage({
       id: n.id,
       text: n.text ?? "",
       original_text: n.original_text,
+      ai_text: n.ai_text,
     }));
   }
 

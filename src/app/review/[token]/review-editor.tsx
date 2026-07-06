@@ -3,7 +3,11 @@
 import { useState, useTransition } from "react";
 import { Sparkles } from "lucide-react";
 import { Card } from "@/app/review/ui";
-import { regenerateSuggestion, saveReviewByToken } from "./actions";
+import {
+  regenerateNoteSuggestion,
+  regenerateSuggestion,
+  saveReviewByToken,
+} from "./actions";
 
 export type ReviewPhoto = { id: string; filename: string };
 
@@ -21,6 +25,7 @@ export type ReviewNote = {
   id: string;
   text: string;
   original_text: string | null;
+  ai_text: string | null;
 };
 
 type Source = "original" | "ai" | "custom";
@@ -70,8 +75,23 @@ export function ReviewEditor({
     () => new Map(items.map((item) => [item.id, item.ai_comment])),
   );
   const [noteEdits, setNoteEdits] = useState(
-    () => new Map(notes.map((note) => [note.id, note.text])),
+    () =>
+      new Map(
+        notes.map((note) => {
+          // Same default as items: an untouched note starts on the AI
+          // suggestion when one is ready; anything already edited stays as saved.
+          const text =
+            note.text === note.original_text && note.ai_text
+              ? note.ai_text
+              : note.text;
+          return [note.id, text];
+        }),
+      ),
   );
+  const [noteAiText, setNoteAiText] = useState(
+    () => new Map(notes.map((note) => [note.id, note.ai_text])),
+  );
+  const [noteRegenerating, setNoteRegenerating] = useState<Set<string>>(new Set());
   const [regenerating, setRegenerating] = useState<Set<string>>(new Set());
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +144,34 @@ export function ReviewEditor({
     setSavedNote(null);
   }
 
+  async function chooseNoteAi(note: ReviewNote) {
+    const known = noteAiText.get(note.id);
+    if (known) {
+      updateNote(note.id, known);
+      return;
+    }
+    setNoteRegenerating((prev) => new Set(prev).add(note.id));
+    setError(null);
+    try {
+      const current = noteEdits.get(note.id) ?? note.text;
+      const generated = await regenerateNoteSuggestion(token, note.id, current);
+      if (generated) {
+        setNoteAiText((prev) => new Map(prev).set(note.id, generated));
+        updateNote(note.id, generated);
+      } else {
+        setError("No AI suggestion could be generated for this note.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't generate a suggestion.");
+    } finally {
+      setNoteRegenerating((prev) => {
+        const next = new Set(prev);
+        next.delete(note.id);
+        return next;
+      });
+    }
+  }
+
   function save() {
     setError(null);
     setSavedNote(null);
@@ -158,20 +206,59 @@ export function ReviewEditor({
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
             These notes flow through the report’s first page in order.
           </p>
-          <div className="mt-4 space-y-3">
-            {notes.map((note, i) => (
-              <div key={note.id}>
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-                  Note {i + 1}
-                </p>
-                <textarea
-                  value={noteEdits.get(note.id) ?? note.text}
-                  onChange={(e) => updateNote(note.id, e.target.value)}
-                  rows={3}
-                  className="mt-1 block w-full rounded-lg border border-black/[.12] bg-white px-3 py-2 text-sm leading-6 text-[#111817] dark:border-white/[.18] dark:bg-zinc-900 dark:text-zinc-50"
-                />
-              </div>
-            ))}
+          <div className="mt-4 space-y-4">
+            {notes.map((note, i) => {
+              const text = noteEdits.get(note.id) ?? note.text;
+              const ai = noteAiText.get(note.id) ?? null;
+              const isRegenerating = noteRegenerating.has(note.id);
+              const active = sourceOf(text, note.original_text, ai);
+              return (
+                <div key={note.id}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+                      Note {i + 1}
+                    </p>
+                    <div
+                      role="radiogroup"
+                      aria-label="Wording source"
+                      className="inline-flex overflow-hidden rounded-md border border-black/[.12] dark:border-white/[.18]"
+                    >
+                      <PillButton
+                        active={active === "original"}
+                        disabled={!note.original_text}
+                        onClick={() =>
+                          note.original_text && updateNote(note.id, note.original_text)
+                        }
+                      >
+                        Original
+                      </PillButton>
+                      <PillButton
+                        active={active === "ai"}
+                        busy={isRegenerating}
+                        onClick={() => chooseNoteAi(note)}
+                      >
+                        <Sparkles className="h-3 w-3" aria-hidden="true" />
+                        {isRegenerating ? "Generating…" : "AI suggestion"}
+                      </PillButton>
+                      <PillButton active={active === "custom"} disabled>
+                        Custom
+                      </PillButton>
+                    </div>
+                  </div>
+                  <textarea
+                    value={text}
+                    onChange={(e) => updateNote(note.id, e.target.value)}
+                    rows={3}
+                    className="mt-1 block w-full rounded-lg border border-black/[.12] bg-white px-3 py-2 text-sm leading-6 text-[#111817] dark:border-white/[.18] dark:bg-zinc-900 dark:text-zinc-50"
+                  />
+                  {note.original_text && active !== "original" && (
+                    <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                      Original: {note.original_text}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Card>
       )}
