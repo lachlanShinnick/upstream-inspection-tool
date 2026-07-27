@@ -525,12 +525,14 @@ export function CaptureScreen({
                 {pendingSync > 0 ? ` · ${pendingSync} syncing` : " · synced"}
               </p>
             </div>
-            <Link
-              href={`/inspect/${inspectionId}/generate`}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-white/90 px-3 py-1.5 text-xs font-semibold text-black hover:bg-white"
-            >
-              Review &amp; generate
-            </Link>
+            {!isIncoming && (
+              <Link
+                href={`/inspect/${inspectionId}/generate`}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white/90 px-3 py-1.5 text-xs font-semibold text-black hover:bg-white"
+              >
+                Review &amp; generate
+              </Link>
+            )}
           </div>
         </div>
       </header>
