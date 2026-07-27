@@ -15,12 +15,14 @@ import {
   Check,
   ChevronDown,
   Flame,
+  MessageSquare,
   Plus,
   Snowflake,
   Trash2,
   Zap,
 } from "lucide-react";
 import {
+  type IncomingCommentRow,
   type IncomingInspectionDetails,
   type IncomingServiceRow,
   isServiceRowComplete,
@@ -57,11 +59,14 @@ function readDetailsDraft(
     const parsed = JSON.parse(
       window.localStorage.getItem(detailsDraftKey(inspectionId)) ?? "null",
     ) as IncomingInspectionDetails | null;
+    // Every repeating section has to be present and an array -- a draft saved
+    // before one of them existed would otherwise blow up on .map below.
     if (
       parsed &&
       typeof parsed === "object" &&
       Array.isArray(parsed.hvacUnits) &&
-      Array.isArray(parsed.fireServices)
+      Array.isArray(parsed.fireServices) &&
+      Array.isArray(parsed.otherComments)
     ) {
       return parsed;
     }
@@ -257,6 +262,29 @@ export function IncomingInspectionScreen({
     patch(
       key,
       details[key].filter((row) => row.id !== id),
+    );
+  }
+
+  function addComment() {
+    patch("otherComments", [
+      ...details.otherComments,
+      { id: crypto.randomUUID(), text: "" },
+    ]);
+  }
+
+  function updateComment(id: string, text: string) {
+    patch(
+      "otherComments",
+      details.otherComments.map((row) =>
+        row.id === id ? { ...row, text } : row,
+      ),
+    );
+  }
+
+  function removeComment(id: string) {
+    patch(
+      "otherComments",
+      details.otherComments.filter((row) => row.id !== id),
     );
   }
 
@@ -464,6 +492,15 @@ export function IncomingInspectionScreen({
             updateService("fireServices", id, field, value)
           }
           onRemove={(id) => removeService("fireServices", id)}
+          onSave={() => save()}
+        />
+
+        <OtherCommentsSection
+          rows={details.otherComments}
+          saving={saving}
+          onAdd={addComment}
+          onChange={updateComment}
+          onRemove={removeComment}
           onSave={() => save()}
         />
 
@@ -712,6 +749,84 @@ function ServiceSection({
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           {addLabel}
+        </button>
+        {rows.length > 0 && (
+          <SaveSectionButton saving={saving} onClick={onSave} compact />
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Free-text notes for the report's "Other Comments" table. Added one at a time
+ * in the field, so each row is its own textarea rather than one big block.
+ */
+function OtherCommentsSection({
+  rows,
+  saving,
+  onAdd,
+  onChange,
+  onRemove,
+  onSave,
+}: {
+  rows: IncomingCommentRow[];
+  saving: boolean;
+  onAdd: () => void;
+  onChange: (id: string, text: string) => void;
+  onRemove: (id: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <Card>
+      <SectionHeading
+        title="Other comments"
+        complete={rows.every((row) => row.text.trim())}
+        icon={<MessageSquare className="h-5 w-5" aria-hidden="true" />}
+      />
+      {rows.length === 0 ? (
+        <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+          None added. Comments are optional and appear in their own table at the
+          end of the report.
+        </p>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {rows.map((row, index) => (
+            <li key={row.id} className="flex items-start gap-3">
+              <span className="mt-3 w-5 shrink-0 text-sm font-semibold text-zinc-400">
+                {index + 1}.
+              </span>
+              <label className="flex-1">
+                <span className="sr-only">Comment {index + 1}</span>
+                <textarea
+                  value={row.text}
+                  rows={2}
+                  placeholder="Add a comment…"
+                  onChange={(event) => onChange(row.id, event.target.value)}
+                  className={`${inputClass} mt-0 resize-y`}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => onRemove(row.id)}
+                title={`Remove comment ${index + 1}`}
+                aria-label={`Remove comment ${index + 1}`}
+                className="mt-1 grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-black/[.12] px-4 text-sm font-semibold dark:border-white/[.18]"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          Add comment
         </button>
         {rows.length > 0 && (
           <SaveSectionButton saving={saving} onClick={onSave} compact />

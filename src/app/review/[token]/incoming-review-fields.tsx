@@ -162,6 +162,72 @@ export function IncomingReviewFields({
           )
         }
       />
+
+      <Card>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+            Other comments
+          </h2>
+          <button
+            type="button"
+            onClick={() =>
+              patch("otherComments", [
+                ...details.otherComments,
+                { id: crypto.randomUUID(), text: "" },
+              ])
+            }
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-black/[.12] px-3 text-sm font-semibold dark:border-white/[.18]"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add
+          </button>
+        </div>
+        {details.otherComments.length === 0 ? (
+          <p className="mt-3 text-sm text-zinc-500">None recorded.</p>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {details.otherComments.map((row, index) => (
+              <li key={row.id} className="flex items-start gap-3">
+                <span className="mt-2.5 w-5 shrink-0 text-sm font-semibold text-zinc-400">
+                  {index + 1}.
+                </span>
+                <label className="flex-1">
+                  <span className="sr-only">Comment {index + 1}</span>
+                  <textarea
+                    value={row.text}
+                    rows={2}
+                    onChange={(event) =>
+                      patch(
+                        "otherComments",
+                        details.otherComments.map((item) =>
+                          item.id === row.id
+                            ? { ...item, text: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                    className={`${inputClass} mt-0 resize-y`}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    patch(
+                      "otherComments",
+                      details.otherComments.filter((item) => item.id !== row.id),
+                    )
+                  }
+                  title={`Remove comment ${index + 1}`}
+                  aria-label={`Remove comment ${index + 1}`}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-red-50 hover:text-red-600"
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </>
   );
 }

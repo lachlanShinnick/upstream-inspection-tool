@@ -9,6 +9,12 @@ export type IncomingServiceRow = {
   lastServiceDate: string;
 };
 
+/** One free-text "Other Comments" entry, added on its own in the field. */
+export type IncomingCommentRow = {
+  id: string;
+  text: string;
+};
+
 export type IncomingInspectionDetails = {
   streetAddress: string;
   suburb: string;
@@ -25,6 +31,7 @@ export type IncomingInspectionDetails = {
   electricalDbCount: string;
   hvacUnits: IncomingServiceRow[];
   fireServices: IncomingServiceRow[];
+  otherComments: IncomingCommentRow[];
 };
 
 const EMPTY_INCOMING_DETAILS: IncomingInspectionDetails = {
@@ -43,6 +50,7 @@ const EMPTY_INCOMING_DETAILS: IncomingInspectionDetails = {
   electricalDbCount: "",
   hvacUnits: [],
   fireServices: [],
+  otherComments: [],
 };
 
 export function deriveIncomingAddress(propertyName: string): {
@@ -75,6 +83,18 @@ function serviceRows(value: unknown, withLocation: boolean): IncomingServiceRow[
       type: clean(item.type),
       ...(withLocation ? { location: clean(item.location) } : {}),
       lastServiceDate: clean(item.lastServiceDate),
+    };
+  });
+}
+
+function commentRows(value: unknown): IncomingCommentRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((row, index) => {
+    const item =
+      row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+    return {
+      id: clean(item.id) || `comment-${index}`,
+      text: clean(item.text),
     };
   });
 }
@@ -119,6 +139,7 @@ export function incomingDetailsFromRow(
     electricalDbCount: clean(row.electrical_db_count),
     hvacUnits: serviceRows(row.hvac_units, true),
     fireServices: serviceRows(row.fire_services, false),
+    otherComments: commentRows(row.other_comments),
   };
 }
 
@@ -147,6 +168,10 @@ export function incomingDetailsToRow(details: IncomingInspectionDetails) {
       id: clean(row.id),
       type: clean(row.type),
       lastServiceDate: clean(row.lastServiceDate),
+    })),
+    other_comments: details.otherComments.map((row) => ({
+      id: clean(row.id),
+      text: clean(row.text),
     })),
     updated_at: new Date().toISOString(),
   };
@@ -188,6 +213,11 @@ export function validateIncomingDetails(
     if (!clean(row.lastServiceDate)) {
       missing.push(`Fire service ${index + 1} last service date`);
     }
+  });
+  // Comments are optional as a section, but an added row left blank would
+  // render as an empty line in the report's Other Comments table.
+  details.otherComments.forEach((row, index) => {
+    if (!clean(row.text)) missing.push(`Other comment ${index + 1}`);
   });
   return missing;
 }

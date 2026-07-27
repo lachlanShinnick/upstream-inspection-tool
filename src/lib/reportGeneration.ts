@@ -252,6 +252,9 @@ export async function renderReportDocx(
     }
     const displayServiceDate = (value: string) =>
       /^\d{4}-\d{2}-\d{2}$/.test(value) ? formatDateAU(value) : value;
+    const otherComments = details.otherComments
+      .map((row) => ({ text: row.text.trim() }))
+      .filter((row) => row.text);
     incomingData = {
       street_address: details.streetAddress,
       suburb: details.suburb,
@@ -275,6 +278,12 @@ export async function renderReportDocx(
         type: service.type,
         last_service_date: displayServiceDate(service.lastServiceDate),
       })),
+      other_comments: otherComments,
+      // The template wraps the whole Other Comments table in this flag, so an
+      // inspection without comments renders no table at all rather than a bare
+      // header row. It's a separate tag from the row loop on purpose --
+      // docxtemplater can't tell the two apart if they share a name.
+      has_other_comments: otherComments.length > 0,
     };
   }
 
