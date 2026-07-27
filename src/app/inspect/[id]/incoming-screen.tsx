@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -18,7 +18,7 @@ import {
   type IncomingServiceRow,
   validateIncomingDetails,
 } from "@/lib/incomingInspection";
-import { AppShell, Card, NavLink } from "@/app/ui";
+import { AppShell, Card } from "@/app/ui";
 import {
   deleteIncomingObservation,
   saveIncomingDetails,
@@ -35,6 +35,33 @@ export type IncomingObservation = {
 const inputClass =
   "mt-1 block min-h-11 w-full rounded-lg border border-black/[.12] bg-white px-3 py-2 text-sm text-[#111817] outline-none focus:border-[#0072c6] dark:border-white/[.18] dark:bg-zinc-900 dark:text-zinc-50";
 const labelClass = "block text-sm font-semibold text-[#111817] dark:text-zinc-50";
+
+function detailsDraftKey(inspectionId: string) {
+  return `upstream-incoming-details:${inspectionId}`;
+}
+
+function readDetailsDraft(
+  inspectionId: string,
+  fallback: IncomingInspectionDetails,
+): IncomingInspectionDetails {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(detailsDraftKey(inspectionId)) ?? "null",
+    ) as IncomingInspectionDetails | null;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray(parsed.hvacUnits) &&
+      Array.isArray(parsed.fireServices)
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Ignore damaged or unavailable local storage and use the server copy.
+  }
+  return fallback;
+}
 
 function requiredSetup(details: IncomingInspectionDetails): boolean {
   return [
@@ -82,13 +109,16 @@ export function IncomingInspectionScreen({
   initialObservations: IncomingObservation[];
 }) {
   const router = useRouter();
-  const [details, setDetails] = useState(initialDetails);
+  const [restoredDetails] = useState(() =>
+    readDetailsDraft(inspectionId, initialDetails),
+  );
+  const [details, setDetails] = useState(restoredDetails);
   const [setupComplete, setSetupComplete] = useState(() =>
-    requiredSetup(initialDetails),
+    requiredSetup(restoredDetails),
   );
   const [editingSetup, setEditingSetup] = useState(false);
   const [showElectrical, setShowElectrical] = useState(() =>
-    requiredElectrical(initialDetails),
+    requiredElectrical(restoredDetails),
   );
   const [observations, setObservations] = useState(initialObservations);
   const [saving, startSaving] = useTransition();
@@ -97,6 +127,34 @@ export function IncomingInspectionScreen({
 
   const missing = useMemo(() => validateIncomingDetails(details), [details]);
   const ready = missing.length === 0;
+
+  useEffect(() => {
+    const snapshot = JSON.stringify(details);
+    try {
+      window.localStorage.setItem(
+        detailsDraftKey(inspectionId),
+        snapshot,
+      );
+    } catch {
+      // The server copy still saves through explicit navigation and controls.
+    }
+
+    const timer = window.setTimeout(() => {
+      void saveIncomingDetails(inspectionId, details)
+        .then(() => {
+          if (
+            window.localStorage.getItem(detailsDraftKey(inspectionId)) ===
+            snapshot
+          ) {
+            window.localStorage.removeItem(detailsDraftKey(inspectionId));
+          }
+        })
+        .catch(() => {
+          // Keep the local draft when offline; it will be restored on return.
+        });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [details, inspectionId]);
 
   function patch<K extends keyof IncomingInspectionDetails>(
     key: K,
@@ -112,6 +170,11 @@ export function IncomingInspectionScreen({
     startSaving(async () => {
       try {
         await saveIncomingDetails(inspectionId, nextDetails);
+        try {
+          window.localStorage.removeItem(detailsDraftKey(inspectionId));
+        } catch {
+          // The server copy is authoritative once this save succeeds.
+        }
         setDetails(nextDetails);
         setSavedNote("Information saved.");
         afterSave?.();
@@ -189,10 +252,15 @@ export function IncomingInspectionScreen({
         title={propertyName}
         subtitle="Complete the property and tenant information before starting the inspection."
         actions={
-          <NavLink href="/dashboard">
+          <button
+            type="button"
+            onClick={() => saveAndNavigate("/dashboard")}
+            disabled={saving}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-black/[.04] hover:text-[#111817] disabled:opacity-60 dark:text-zinc-300 dark:hover:bg-white/[.08] dark:hover:text-white"
+          >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             Dashboard
-          </NavLink>
+          </button>
         }
       >
         <Card>
@@ -232,10 +300,15 @@ export function IncomingInspectionScreen({
       subtitle={`Inspection date ${inspectionDate}`}
       actions={
         <>
-          <NavLink href="/dashboard">
+          <button
+            type="button"
+            onClick={() => saveAndNavigate("/dashboard")}
+            disabled={saving}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-black/[.04] hover:text-[#111817] disabled:opacity-60 dark:text-zinc-300 dark:hover:bg-white/[.08] dark:hover:text-white"
+          >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             Dashboard
-          </NavLink>
+          </button>
           {ready ? (
             <button
               type="button"

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
+  ArrowRight,
   ClipboardList,
   Download,
   FileSignature,
@@ -53,16 +54,28 @@ export default async function DashboardPage() {
     webUrl: string | null;
   };
   let reports: ReportRow[] = [];
+  let drafts: ReportRow[] = [];
   if (storedUser?.id) {
-    const { data: generated } = await supabaseAdmin()
-      .from("inspections")
-      .select(
-        "id, property_name, inspection_date, report_type, onedrive_drive_id, generated_doc_onedrive_id",
-      )
-      .eq("user_id", storedUser.id)
-      .eq("status", "generated")
-      .order("created_at", { ascending: false })
-      .limit(10);
+    const [{ data: generated }, { data: draftRows }] = await Promise.all([
+      supabaseAdmin()
+        .from("inspections")
+        .select(
+          "id, property_name, inspection_date, report_type, onedrive_drive_id, generated_doc_onedrive_id",
+        )
+        .eq("user_id", storedUser.id)
+        .eq("status", "generated")
+        .order("created_at", { ascending: false })
+        .limit(10),
+      supabaseAdmin()
+        .from("inspections")
+        .select(
+          "id, property_name, inspection_date, report_type, onedrive_drive_id, generated_doc_onedrive_id",
+        )
+        .eq("user_id", storedUser.id)
+        .eq("status", "draft")
+        .order("created_at", { ascending: false })
+        .limit(10),
+    ]);
 
     reports = await Promise.all(
       (generated ?? []).map(async (r) => ({
@@ -78,6 +91,13 @@ export default async function DashboardPage() {
           : null,
       })),
     );
+    drafts = (draftRows ?? []).map((row) => ({
+      id: row.id,
+      property_name: row.property_name,
+      inspection_date: row.inspection_date,
+      report_type: row.report_type,
+      webUrl: null,
+    }));
   }
 
   return (
@@ -163,6 +183,46 @@ export default async function DashboardPage() {
           </div>
         </Card>
       </div>
+
+      {drafts.length > 0 && (
+        <section className="mt-4">
+          <Card>
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300">
+                <ClipboardList className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <h2 className="text-base font-semibold text-[#111817] dark:text-zinc-50">
+                In progress
+              </h2>
+            </div>
+            <ul className="mt-4 divide-y divide-black/[.06] dark:divide-white/[.08]">
+              {drafts.map((draft) => (
+                <li
+                  key={draft.id}
+                  className="flex items-center justify-between gap-3 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[#111817] dark:text-zinc-50">
+                      {formatPropertyName(draft.property_name)}
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {reportTypeInfo(draft.report_type).title} ·{" "}
+                      {formatDateAU(draft.inspection_date)}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/inspect/${draft.id}`}
+                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-black/[.12] px-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-black/[.04] dark:border-white/[.18] dark:text-zinc-300 dark:hover:bg-white/[.08]"
+                  >
+                    Continue
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </section>
+      )}
 
       <section className="mt-4">
         <Card>
