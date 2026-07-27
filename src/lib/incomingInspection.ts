@@ -13,6 +13,12 @@ export type IncomingServiceRow = {
 export type IncomingCommentRow = {
   id: string;
   text: string;
+  /**
+   * Last AI-polished wording for this comment, mirroring action_items.ai_comment
+   * and incident_notes.ai_text. Cached so re-opening the review page reuses the
+   * suggestion instead of paying for another OpenAI call.
+   */
+  aiText?: string;
 };
 
 export type IncomingInspectionDetails = {
@@ -92,9 +98,11 @@ function commentRows(value: unknown): IncomingCommentRow[] {
   return value.map((row, index) => {
     const item =
       row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+    const aiText = clean(item.aiText);
     return {
       id: clean(item.id) || `comment-${index}`,
       text: clean(item.text),
+      ...(aiText ? { aiText } : {}),
     };
   });
 }
@@ -172,6 +180,9 @@ export function incomingDetailsToRow(details: IncomingInspectionDetails) {
     other_comments: details.otherComments.map((row) => ({
       id: clean(row.id),
       text: clean(row.text),
+      // Preserved on save so a suggestion generated on the review page isn't
+      // lost the moment the reviewer saves anything else.
+      ...(clean(row.aiText) ? { aiText: clean(row.aiText) } : {}),
     })),
     updated_at: new Date().toISOString(),
   };

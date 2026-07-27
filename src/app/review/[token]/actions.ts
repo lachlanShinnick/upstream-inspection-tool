@@ -132,22 +132,53 @@ export async function regenerateSuggestion(
 }
 
 /**
- * Polish one incoming-inspection "Other Comments" entry.
- *
- * Unlike action items and notes there's nowhere to persist this: comments live
- * in a jsonb array on incoming_inspection_details, and writing back would mean
- * a read-modify-write that could clobber the reviewer's other unsaved edits.
- * The suggestion is returned for the reviewer to accept, and becomes the
- * comment's own text when they save.
+ * Same as {@link regenerateSuggestion}, for one incoming-inspection "Other
+ * Comments" entry. These live in a jsonb array rather than their own column,
+ * so caching the suggestion means reading the array back, setting aiText on the
+ * matching entry and writing it out again. Only other_comments is touched, so a
+ * concurrent save of the surrounding details can't be lost to this write.
  */
 export async function regenerateCommentSuggestion(
   token: string,
+  commentId: string,
   text: string,
 ): Promise<string | null> {
   const scope = await validateReviewToken(token);
   if (!scope) throw new Error("This review link has expired.");
 
-  return polishComment(text);
+  const polished = await polishComment(text);
+  if (!polished) return null;
+
+  const sb = supabaseAdmin();
+  const { data: row, error: readErr } = await sb
+    .from("incoming_inspection_details")
+    .select("other_comments")
+    .eq("inspection_id", scope.inspectionId)
+    .maybeSingle();
+  if (readErr) throw new Error(`Couldn't save suggestion: ${readErr.message}`);
+
+  const stored = Array.isArray(row?.other_comments)
+    ? (row.other_comments as Record<string, unknown>[])
+    : [];
+  let matched = false;
+  const next = stored.map((entry) => {
+    const item = entry && typeof entry === "object" ? entry : {};
+    if (item.id !== commentId) return entry;
+    matched = true;
+    return { ...item, aiText: polished };
+  });
+
+  // A comment the reviewer just added isn't in the stored array yet. The
+  // suggestion still goes back to them, and persists with their next save.
+  if (matched) {
+    const { error } = await sb
+      .from("incoming_inspection_details")
+      .update({ other_comments: next, updated_at: new Date().toISOString() })
+      .eq("inspection_id", scope.inspectionId);
+    if (error) throw new Error(`Couldn't save suggestion: ${error.message}`);
+  }
+
+  return polished;
 }
 
 /** Same as {@link regenerateSuggestion}, for an incident-report note. */

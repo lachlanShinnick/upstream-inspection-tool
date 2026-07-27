@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Plus, Sparkles, Trash2, Undo2 } from "lucide-react";
 import {
+  type IncomingCommentRow,
   type IncomingInspectionDetails,
   type IncomingServiceRow,
 } from "@/lib/incomingInspection";
@@ -37,29 +38,48 @@ export function IncomingReviewFields({
     onChange({ ...details, [key]: value });
   }
 
-  function setCommentText(id: string, text: string) {
+  function updateComment(id: string, changes: Partial<IncomingCommentRow>) {
     patch(
       "otherComments",
       details.otherComments.map((item) =>
-        item.id === id ? { ...item, text } : item,
+        item.id === id ? { ...item, ...changes } : item,
       ),
     );
   }
 
-  async function suggestComment(id: string, current: string) {
-    if (!current.trim()) {
+  function setCommentText(id: string, text: string) {
+    updateComment(id, { text });
+  }
+
+  function rememberOriginal(id: string, text: string) {
+    setPreSuggestion((prev) =>
+      prev.has(id) ? prev : new Map(prev).set(id, text),
+    );
+  }
+
+  async function suggestComment(row: IncomingCommentRow) {
+    // Already polished once -- reuse it rather than paying for another call,
+    // the same way chooseAi reuses a stored ai_comment.
+    if (row.aiText) {
+      rememberOriginal(row.id, row.text);
+      setCommentText(row.id, row.aiText);
+      return;
+    }
+    if (!row.text.trim()) {
       setAiError("Write the comment first, then ask for a suggestion.");
       return;
     }
     setAiError(null);
-    setSuggesting((prev) => new Set(prev).add(id));
+    setSuggesting((prev) => new Set(prev).add(row.id));
     try {
-      const generated = await regenerateCommentSuggestion(token, current);
+      const generated = await regenerateCommentSuggestion(
+        token,
+        row.id,
+        row.text,
+      );
       if (generated) {
-        setPreSuggestion((prev) =>
-          prev.has(id) ? prev : new Map(prev).set(id, current),
-        );
-        setCommentText(id, generated);
+        rememberOriginal(row.id, row.text);
+        updateComment(row.id, { text: generated, aiText: generated });
       } else {
         setAiError("No AI suggestion could be generated for this comment.");
       }
@@ -70,7 +90,7 @@ export function IncomingReviewFields({
     } finally {
       setSuggesting((prev) => {
         const next = new Set(prev);
-        next.delete(id);
+        next.delete(row.id);
         return next;
       });
     }
@@ -277,7 +297,7 @@ export function IncomingReviewFields({
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => suggestComment(row.id, row.text)}
+                        onClick={() => suggestComment(row)}
                         disabled={busy}
                         className="inline-flex h-8 items-center gap-1.5 rounded-md border border-black/[.12] px-3 text-xs font-semibold text-zinc-600 transition-colors hover:bg-black/[.04] disabled:cursor-default disabled:opacity-50 dark:border-white/[.18] dark:text-zinc-300 dark:hover:bg-white/[.08]"
                       >
