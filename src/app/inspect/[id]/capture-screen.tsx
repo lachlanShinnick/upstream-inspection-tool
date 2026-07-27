@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Camera, Check, ClipboardList, NotebookPen, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Camera,
+  Check,
+  ClipboardList,
+  NotebookPen,
+  X,
+} from "lucide-react";
 import {
   createIncidentNote,
   createReportedItem,
@@ -24,6 +31,10 @@ import {
   type QueuedNoteSave,
   type QueuedPhoto,
 } from "@/lib/offline/db";
+import {
+  INSPECTION_CONDITIONS,
+  type InspectionCondition,
+} from "@/lib/incomingInspection";
 
 type Mode = "default" | "report";
 
@@ -65,6 +76,7 @@ export function CaptureScreen({
   initialAreas,
   initialInReport,
   isIncident = false,
+  isIncoming = false,
   initialNoteCount = 0,
 }: {
   inspectionId: string;
@@ -75,6 +87,8 @@ export function CaptureScreen({
   /** Incident reports: photos are standalone entries (area + description)
    *  rather than action items, and narrative notes can be added. */
   isIncident?: boolean;
+  /** Incoming inspections rate each individual photo after capture. */
+  isIncoming?: boolean;
   initialNoteCount?: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -277,6 +291,7 @@ export function CaptureScreen({
             itemSave.area,
             itemSave.comment,
             photos,
+            itemSave.condition,
           );
           await deleteItemSave(itemSave.localUuid);
           for (const photo of photos) {
@@ -374,7 +389,15 @@ export function CaptureScreen({
       };
       await putPhoto(queued);
       setTotalTaken((n) => n + 1);
-      if (mode === "report") {
+      if (isIncoming) {
+        const next = [
+          { localUuid, width: shot.width, height: shot.height, takenAt },
+        ];
+        reportPhotosRef.current = next;
+        setReportPhotos(next);
+        setMode("report");
+        setShowForm(true);
+      } else if (mode === "report") {
         const next = [
           ...reportPhotosRef.current,
           { localUuid, width: shot.width, height: shot.height, takenAt },
@@ -405,13 +428,18 @@ export function CaptureScreen({
     setMode("default");
   }
 
-  async function saveItem(area: string, comment: string) {
+  async function saveItem(
+    area: string,
+    comment: string,
+    condition?: InspectionCondition,
+  ) {
     const photosForItem = reportPhotosRef.current;
     const itemSave: QueuedItemSave = {
       localUuid: crypto.randomUUID(),
       inspectionId,
       area,
       comment,
+      condition,
       photos: photosForItem.map((p) => ({
         localUuid: p.localUuid,
         width: p.width,
@@ -430,9 +458,11 @@ export function CaptureScreen({
     setShowForm(false);
     setMode("default");
     setToast(
-      `${isIncident ? "Photo entry" : "Action item"} queued with ${photosForItem.length} photo${
-        photosForItem.length === 1 ? "" : "s"
-      }.`,
+      isIncoming
+        ? "Rated photo queued."
+        : `${isIncident ? "Photo entry" : "Action item"} queued with ${photosForItem.length} photo${
+            photosForItem.length === 1 ? "" : "s"
+          }.`,
     );
     await refreshPendingSync();
     void drainQueue();
@@ -454,14 +484,20 @@ export function CaptureScreen({
     void drainQueue();
   }
 
-  const entryNoun = isIncident ? "photo entry" : "action item";
+  const entryNoun = isIncoming
+    ? "rated photo"
+    : isIncident
+      ? "photo entry"
+      : "action item";
   const headerMain =
     mode === "report"
       ? `${reportPhotos.length} photo${reportPhotos.length === 1 ? "" : "s"} for this ${entryNoun}`
       : `${totalTaken} photo${totalTaken === 1 ? "" : "s"} taken`;
   const headerCounts = isIncident
     ? `${noteCount} note${noteCount === 1 ? "" : "s"} · ${inReportSaved} in report`
-    : `${totalTaken} photos · ${inReportSaved} in report`;
+    : isIncoming
+      ? `${inReportSaved} rated photo${inReportSaved === 1 ? "" : "s"}`
+      : `${totalTaken} photos · ${inReportSaved} in report`;
 
   return (
     <div className="relative flex h-dvh flex-col bg-black text-white">
@@ -470,11 +506,11 @@ export function CaptureScreen({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1 rounded-lg bg-black/28 px-3 py-2 backdrop-blur-md">
             <Link
-              href="/dashboard"
+              href={isIncoming ? `/inspect/${inspectionId}` : "/dashboard"}
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/72 hover:text-white"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-              Dashboard
+              {isIncoming ? "Inspection details" : "Dashboard"}
             </Link>
             <p className="mt-1 truncate text-sm font-semibold leading-tight text-white">
               {propertyName}
@@ -568,7 +604,7 @@ export function CaptureScreen({
 
           {/* Right slot */}
           <div className="flex w-28 justify-end">
-            {mode === "default" ? (
+            {mode === "default" && !isIncoming ? (
               <button
                 type="button"
                 onClick={startReport}
@@ -578,7 +614,7 @@ export function CaptureScreen({
                 <ClipboardList className="h-4 w-4" aria-hidden="true" />
                 <span className="leading-tight">Report</span>
               </button>
-            ) : (
+            ) : mode === "report" ? (
               <button
                 type="button"
                 onClick={() => setShowForm(true)}
@@ -587,7 +623,7 @@ export function CaptureScreen({
                 <Check className="h-4 w-4" aria-hidden="true" />
                 Done
               </button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -599,6 +635,7 @@ export function CaptureScreen({
         areas={areas}
         photoCount={reportPhotos.length}
         isIncident={isIncident}
+        isIncoming={isIncoming}
         onCancel={() => setShowForm(false)}
         onSave={saveItem}
       />
@@ -628,6 +665,7 @@ function ItemForm({
   areas,
   photoCount,
   isIncident,
+  isIncoming,
   onCancel,
   onSave,
 }: {
@@ -635,11 +673,17 @@ function ItemForm({
   areas: string[];
   photoCount: number;
   isIncident: boolean;
+  isIncoming: boolean;
   onCancel: () => void;
-  onSave: (area: string, comment: string) => Promise<void>;
+  onSave: (
+    area: string,
+    comment: string,
+    condition?: InspectionCondition,
+  ) => Promise<void>;
 }) {
   const [area, setArea] = useState("");
   const [comment, setComment] = useState("");
+  const [condition, setCondition] = useState<InspectionCondition | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -648,10 +692,14 @@ function ItemForm({
       setError("Enter an area.");
       return;
     }
+    if (isIncoming && !condition) {
+      setError("Choose a condition.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      await onSave(area, comment);
+      await onSave(area, comment, condition ?? undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn’t save.");
       setSaving(false);
@@ -666,10 +714,16 @@ function ItemForm({
     >
       <div className="mx-auto w-full max-w-xl">
         <h2 className="text-xl font-semibold tracking-normal">
-          {isIncident ? "New photo entry" : "New action item"}
+          {isIncoming
+            ? "Rate inspection photo"
+            : isIncident
+              ? "New photo entry"
+              : "New action item"}
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
-          {photoCount} photo{photoCount === 1 ? "" : "s"} attached
+          {isIncoming
+            ? "Choose its area and condition."
+            : `${photoCount} photo${photoCount === 1 ? "" : "s"} attached`}
         </p>
 
         <label className="mt-4 block text-sm font-medium">Area</label>
@@ -694,8 +748,34 @@ function ItemForm({
           </div>
         )}
 
+        {isIncoming && (
+          <fieldset className="mt-4">
+            <legend className="text-sm font-medium">Condition</legend>
+            <div className="mt-2 grid grid-cols-4 overflow-hidden rounded-lg border border-black/10 dark:border-white/15">
+              {INSPECTION_CONDITIONS.map((value) => {
+                const active = condition === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setCondition(value)}
+                    className={`min-h-11 border-r border-black/10 px-2 text-sm font-semibold capitalize last:border-r-0 dark:border-white/15 ${
+                      active
+                        ? "bg-[#0072c6] text-white"
+                        : "bg-[#fbfcfb] text-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                    }`}
+                  >
+                    {value}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        )}
+
         <label className="mt-4 block text-sm font-medium">
-          {isIncident ? "Description" : "Comment"}
+          {isIncident ? "Description" : `Comment${isIncoming ? " (optional)" : ""}`}
         </label>
         <textarea
           value={comment}

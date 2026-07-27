@@ -1,4 +1,5 @@
 import { Download, FileText } from "lucide-react";
+import { incomingDetailsFromRow } from "@/lib/incomingInspection";
 import { formatPropertyName } from "@/lib/propertyName";
 import { reportTypeInfo } from "@/lib/reportTypes";
 import { validateReviewToken } from "@/lib/reviewToken";
@@ -40,10 +41,13 @@ export default async function ReviewPage({
     .single();
 
   const isIncident = inspection?.report_type === "incident";
+  const isIncoming = inspection?.report_type === "incoming";
 
   const { data: items } = await sb
     .from("action_items")
-    .select("id, area, comment, original_comment, ai_comment, sort_order")
+    .select(
+      "id, area, condition, comment, original_comment, ai_comment, sort_order",
+    )
     .eq("inspection_id", scope.inspectionId)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
@@ -85,11 +89,27 @@ export default async function ReviewPage({
   const reviewItems: ReviewItem[] = (items ?? []).map((item) => ({
     id: item.id,
     area: item.area,
+    condition: item.condition,
     comment: item.comment ?? "",
     original_comment: item.original_comment,
     ai_comment: item.ai_comment,
     photos: photosByItem.get(item.id) ?? [],
   }));
+
+  const { data: incomingRow } = isIncoming
+    ? await sb
+        .from("incoming_inspection_details")
+        .select("*")
+        .eq("inspection_id", scope.inspectionId)
+        .maybeSingle()
+    : { data: null };
+  const incomingDetails =
+    isIncoming && inspection
+      ? incomingDetailsFromRow(
+          incomingRow as Record<string, unknown> | null,
+          inspection.property_name,
+        )
+      : undefined;
 
   return (
     <ReviewShell
@@ -122,7 +142,7 @@ export default async function ReviewPage({
         </>
       }
     >
-      {reviewItems.length === 0 && reviewNotes.length === 0 ? (
+      {reviewItems.length === 0 && reviewNotes.length === 0 && !isIncoming ? (
         <Card>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             {isIncident
@@ -136,6 +156,8 @@ export default async function ReviewPage({
           items={reviewItems}
           notes={reviewNotes}
           isIncident={isIncident}
+          isIncoming={isIncoming}
+          incomingDetails={incomingDetails}
         />
       )}
     </ReviewShell>

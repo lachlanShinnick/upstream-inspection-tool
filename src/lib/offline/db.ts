@@ -31,6 +31,7 @@ export type QueuedItemSave = {
   inspectionId: string;
   area: string;
   comment: string;
+  condition?: "new" | "good" | "fair" | "poor";
   photos: { localUuid: string; width: number; height: number; takenAt: string }[];
   attempts: number;
   nextAttemptAt: number;

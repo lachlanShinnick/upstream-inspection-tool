@@ -8,6 +8,11 @@ import { auth } from "@/auth";
 import { downloadDriveItem, uploadFileToFolder } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
 import {
+  formatCondition,
+  incomingDetailsFromRow,
+  validateIncomingDetails,
+} from "@/lib/incomingInspection";
+import {
   parseReportType,
   reportTypeInfo,
   type ReportType,
@@ -21,6 +26,7 @@ const TEMPLATE_BY_TYPE: Record<ReportType, string> = {
   routine: "council-inspection.docx",
   outgoing: "council-inspection.docx",
   incident: "incident-report.docx",
+  incoming: "incoming-inspection.docx",
 };
 
 function templatePath(reportType: ReportType): string {
@@ -34,6 +40,8 @@ const DOCX_MIME =
 // particular were previously letterboxed into a short 76px box and looked small.
 const REPORT_PHOTO_WIDTH = 101;
 const REPORT_PHOTO_HEIGHT = 108;
+const INCOMING_PHOTO_WIDTH = 126;
+const INCOMING_PHOTO_HEIGHT = 105;
 // The raster is generated at this multiple of the display size so Word has
 // enough real pixels to render/print the photo sharply instead of upscaling a
 // display-sized thumbnail.
@@ -77,12 +85,16 @@ function pngSize(buf: Buffer): { width: number; height: number } {
  * raster is rendered at REPORT_PHOTO_SCALE× the display size so the photo stays
  * sharp on screen and in print; the on-page size is fixed separately in getSize.
  */
-async function fitReportPhotoBox(buf: Buffer): Promise<Buffer> {
+async function fitReportPhotoBox(
+  buf: Buffer,
+  width = REPORT_PHOTO_WIDTH,
+  height = REPORT_PHOTO_HEIGHT,
+): Promise<Buffer> {
   return sharp(buf)
     .rotate()
     .resize({
-      width: REPORT_PHOTO_WIDTH * REPORT_PHOTO_SCALE,
-      height: REPORT_PHOTO_HEIGHT * REPORT_PHOTO_SCALE,
+      width: width * REPORT_PHOTO_SCALE,
+      height: height * REPORT_PHOTO_SCALE,
       fit: "contain",
       background: { r: 255, g: 255, b: 255, alpha: 1 },
     })
@@ -174,6 +186,7 @@ export async function renderReportDocx(
   const reportType = parseReportType(inspection.report_type);
   const report = reportTypeInfo(inspection.report_type);
   const isIncident = reportType === "incident";
+  const isIncoming = reportType === "incoming";
 
   const { data: user, error: userErr } = await sb
     .from("users")
@@ -185,7 +198,7 @@ export async function renderReportDocx(
   // 2. Action items (ordered) + their photos (ordered).
   const { data: items, error: itemErr } = await sb
     .from("action_items")
-    .select("id, area, comment")
+    .select("id, area, comment, condition")
     .eq("inspection_id", inspectionId)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
@@ -207,19 +220,77 @@ export async function renderReportDocx(
     if (notes.length === 0 && (!items || items.length === 0)) {
       throw new Error("Add at least one note or photo before generating.");
     }
-  } else if (!items || items.length === 0) {
+  } else if (!isIncoming && (!items || items.length === 0)) {
     throw new Error("Add at least one action item before generating.");
   }
   const itemList = items ?? [];
 
-  const { data: photoData, error: photoErr } = await sb
-    .from("photos")
-    .select("id, action_item_id, onedrive_file_id, filename, width, height, taken_at")
-    .in(
-      "action_item_id",
-      itemList.map((i) => i.id),
-    )
-    .order("taken_at", { ascending: true });
+  let incomingData: Record<string, unknown> = {};
+  if (isIncoming) {
+    const { data: detailRow, error: detailErr } = await sb
+      .from("incoming_inspection_details")
+      .select("*")
+      .eq("inspection_id", inspectionId)
+      .maybeSingle();
+    if (detailErr) {
+      throw new Error(
+        `Failed to load incoming inspection information: ${detailErr.message}`,
+      );
+    }
+    const details = incomingDetailsFromRow(
+      detailRow as Record<string, unknown> | null,
+      inspection.property_name,
+    );
+    const missing = validateIncomingDetails(details);
+    if (missing.length > 0) {
+      throw new Error(`Complete the required information: ${missing.join(", ")}.`);
+    }
+    for (const item of itemList) {
+      if (!item.condition) {
+        throw new Error(`Choose a condition for ${item.area}.`);
+      }
+    }
+    const displayServiceDate = (value: string) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) ? formatDateAU(value) : value;
+    incomingData = {
+      street_address: details.streetAddress,
+      suburb: details.suburb,
+      property_type: details.propertyType,
+      property_area: details.propertyArea,
+      tenant_company: details.tenantCompany,
+      tenant_contact_name: details.tenantContactName,
+      tenant_contact_number: details.tenantContactNumber,
+      lease_term: details.leaseTerm,
+      commencement: displayServiceDate(details.commencement),
+      electrical_nmi: details.electricalNmi,
+      electrical_msb_location: details.electricalMsbLocation,
+      electrical_capacity: details.electricalCapacity,
+      electrical_db_count: details.electricalDbCount,
+      hvac_units: details.hvacUnits.map((unit) => ({
+        type: unit.type,
+        location: unit.location ?? "",
+        last_service_date: displayServiceDate(unit.lastServiceDate),
+      })),
+      fire_services: details.fireServices.map((service) => ({
+        type: service.type,
+        last_service_date: displayServiceDate(service.lastServiceDate),
+      })),
+    };
+  }
+
+  const { data: photoData, error: photoErr } =
+    itemList.length > 0
+      ? await sb
+          .from("photos")
+          .select(
+            "id, action_item_id, onedrive_file_id, filename, width, height, taken_at",
+          )
+          .in(
+            "action_item_id",
+            itemList.map((i) => i.id),
+          )
+          .order("taken_at", { ascending: true })
+      : { data: [], error: null };
   if (photoErr) throw new Error(`Failed to load photos: ${photoErr.message}`);
   const photos = (photoData ?? []) as PhotoRow[];
   const unsynced = photos.filter((p) => !p.onedrive_file_id);
@@ -234,6 +305,14 @@ export async function renderReportDocx(
     const arr = photosByItem.get(p.action_item_id) ?? [];
     arr.push(p);
     photosByItem.set(p.action_item_id, arr);
+  }
+  if (
+    isIncoming &&
+    itemList.some((item) => (photosByItem.get(item.id) ?? []).length !== 1)
+  ) {
+    throw new Error(
+      "Every incoming inspection photo needs one uploaded image. Return to capture and wait for syncing to finish.",
+    );
   }
 
   const driveId = inspection.onedrive_drive_id;
@@ -253,7 +332,11 @@ export async function renderReportDocx(
       bytesByFileId.set(fileId, originalBytes);
       reportImageByFileId.set(
         fileId,
-        await fitReportPhotoBox(originalBytes),
+        await fitReportPhotoBox(
+          originalBytes,
+          isIncoming ? INCOMING_PHOTO_WIDTH : REPORT_PHOTO_WIDTH,
+          isIncoming ? INCOMING_PHOTO_HEIGHT : REPORT_PHOTO_HEIGHT,
+        ),
       );
     }
   }
@@ -284,6 +367,7 @@ export async function renderReportDocx(
       number: i + 1,
       area: item.area,
       comment: item.comment ?? "",
+      condition: formatCondition(item.condition),
       image_refs: photoNumbers.join(", "),
       photos: itemPhotos.map((p, j) => {
         const reportImage = reportImageByFileId.get(p.onedrive_file_id!)!;
@@ -306,8 +390,10 @@ export async function renderReportDocx(
   const report_photos = action_items.flatMap((item) =>
     item.photos.map((photo) => ({
       ...photo,
+      incoming_image: photo.image,
       area: item.area,
       comment: item.comment,
+      condition: item.condition,
     })),
   );
 
@@ -317,9 +403,10 @@ export async function renderReportDocx(
   // cell (last partial row) renders as an empty grid cell.
   type ReportPhoto = (typeof report_photos)[number];
   const photo_rows: Record<string, ReportPhoto>[] = [];
-  for (let i = 0; i < report_photos.length; i += REPORT_PHOTOS_PER_ROW) {
+  const photosPerRow = isIncoming ? 2 : REPORT_PHOTOS_PER_ROW;
+  for (let i = 0; i < report_photos.length; i += photosPerRow) {
     const row: Record<string, ReportPhoto> = {};
-    report_photos.slice(i, i + REPORT_PHOTOS_PER_ROW).forEach((photo, j) => {
+    report_photos.slice(i, i + photosPerRow).forEach((photo, j) => {
       row[`c${j + 1}`] = photo;
     });
     photo_rows.push(row);
@@ -336,6 +423,7 @@ export async function renderReportDocx(
     // narrative log; its photo pages use the exact photo_rows grid the other
     // report templates share.
     ...(isIncident ? { notes } : { action_items }),
+    ...incomingData,
     photo_rows,
     signature: signatureBytes,
   };
@@ -359,6 +447,9 @@ export async function renderReportDocx(
       }
       if (tagName === "image") {
         return [REPORT_PHOTO_WIDTH, REPORT_PHOTO_HEIGHT];
+      }
+      if (tagName === "incoming_image") {
+        return [INCOMING_PHOTO_WIDTH, INCOMING_PHOTO_HEIGHT];
       }
       // Photos: landscape caps width at 600, portrait caps height at 700.
       if (dims.width >= dims.height) {

@@ -3,6 +3,10 @@ import { ArrowLeft, Camera } from "lucide-react";
 import { auth } from "@/auth";
 import { getDriveItemWebUrl } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
+import {
+  incomingDetailsFromRow,
+  validateIncomingDetails,
+} from "@/lib/incomingInspection";
 import { reportTypeInfo } from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink } from "@/app/ui";
@@ -84,6 +88,7 @@ export default async function GeneratePage({
   }
 
   const isIncident = inspection.report_type === "incident";
+  const isIncoming = inspection.report_type === "incoming";
   let noteCount = 0;
   if (isIncident) {
     const { count } = await sb
@@ -95,10 +100,31 @@ export default async function GeneratePage({
 
   const alreadyGenerated = inspection.status === "generated";
   const report = reportTypeInfo(inspection.report_type);
-  const hasContent = isIncident ? itemCount > 0 || noteCount > 0 : itemCount > 0;
-  const canGenerate = hasContent && pendingPhotoCount === 0;
+  let incomingMissing: string[] = [];
+  if (isIncoming) {
+    const { data: incomingRow } = await sb
+      .from("incoming_inspection_details")
+      .select("*")
+      .eq("inspection_id", id)
+      .maybeSingle();
+    incomingMissing = validateIncomingDetails(
+      incomingDetailsFromRow(
+        incomingRow as Record<string, unknown> | null,
+        inspection.property_name,
+      ),
+    );
+  }
+  const hasContent = isIncident
+    ? itemCount > 0 || noteCount > 0
+    : isIncoming
+      ? true
+      : itemCount > 0;
+  const canGenerate =
+    hasContent && pendingPhotoCount === 0 && incomingMissing.length === 0;
 
-  const disabledReason = !hasContent
+  const disabledReason = incomingMissing.length > 0
+    ? `Complete the required information first: ${incomingMissing.join(", ")}.`
+    : !hasContent
     ? isIncident
       ? "Add at least one note or photo before generating."
       : "Add at least one action item before generating."
@@ -147,6 +173,11 @@ export default async function GeneratePage({
             />
             {isIncident ? (
               <SummaryRow label="Notes" value={String(noteCount)} />
+            ) : isIncoming ? (
+              <SummaryRow
+                label="Condition photos"
+                value={String(itemCount)}
+              />
             ) : (
               <SummaryRow label="Action items" value={String(itemCount)} />
             )}
@@ -164,7 +195,7 @@ export default async function GeneratePage({
             Document
           </h2>
           <p className="mt-2 mb-4 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Fills the branded template with action items, photos and your
+            Fills the branded template with inspection information, photos and your
             sign-off, and saves it to your OneDrive. From there you can send
             Dave a link to review the wording and download it.
           </p>

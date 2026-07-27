@@ -2,7 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { Sparkles } from "lucide-react";
+import {
+  INSPECTION_CONDITIONS,
+  type IncomingInspectionDetails,
+  type InspectionCondition,
+} from "@/lib/incomingInspection";
 import { Card } from "@/app/review/ui";
+import { IncomingReviewFields } from "./incoming-review-fields";
 import {
   regenerateNoteSuggestion,
   regenerateSuggestion,
@@ -14,6 +20,7 @@ export type ReviewPhoto = { id: string; filename: string };
 export type ReviewItem = {
   id: string;
   area: string;
+  condition: string | null;
   comment: string;
   original_comment: string | null;
   ai_comment: string | null;
@@ -49,11 +56,15 @@ export function ReviewEditor({
   items,
   notes = [],
   isIncident = false,
+  isIncoming = false,
+  incomingDetails,
 }: {
   token: string;
   items: ReviewItem[];
   notes?: ReviewNote[];
   isIncident?: boolean;
+  isIncoming?: boolean;
+  incomingDetails?: IncomingInspectionDetails;
 }) {
   const [edits, setEdits] = useState(
     () =>
@@ -67,7 +78,14 @@ export function ReviewEditor({
             item.comment === item.original_comment && item.ai_comment
               ? item.ai_comment
               : item.comment;
-          return [item.id, { area: item.area, comment }];
+          return [
+            item.id,
+            {
+              area: item.area,
+              comment,
+              condition: item.condition as InspectionCondition | null,
+            },
+          ];
         }),
       ),
   );
@@ -96,8 +114,13 @@ export function ReviewEditor({
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [incomingEdit, setIncomingEdit] = useState(incomingDetails);
 
-  function updateEdit(id: string, field: "area" | "comment", value: string) {
+  function updateEdit(
+    id: string,
+    field: "area" | "comment" | "condition",
+    value: string,
+  ) {
     setEdits((prev) => {
       const next = new Map(prev);
       const current = next.get(id);
@@ -179,7 +202,7 @@ export function ReviewEditor({
       try {
         const payload = Array.from(edits, ([id, edit]) => ({ id, ...edit }));
         const notePayload = Array.from(noteEdits, ([id, text]) => ({ id, text }));
-        await saveReviewByToken(token, payload, notePayload);
+        await saveReviewByToken(token, payload, notePayload, incomingEdit);
         setSavedNote("Changes saved.");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't save changes.");
@@ -196,6 +219,16 @@ export function ReviewEditor({
         >
           {error}
         </p>
+      )}
+
+      {isIncoming && incomingEdit && (
+        <IncomingReviewFields
+          details={incomingEdit}
+          onChange={(next) => {
+            setIncomingEdit(next);
+            setSavedNote(null);
+          }}
+        />
       )}
 
       {notes.length > 0 && (
@@ -264,7 +297,11 @@ export function ReviewEditor({
       )}
 
       {items.map((item, i) => {
-        const edit = edits.get(item.id) ?? { area: item.area, comment: item.comment };
+        const edit = edits.get(item.id) ?? {
+          area: item.area,
+          comment: item.comment,
+          condition: item.condition as InspectionCondition | null,
+        };
         const ai = aiText.get(item.id) ?? null;
         const isRegenerating = regenerating.has(item.id);
         const active = sourceOf(edit.comment, item.original_comment, ai);
@@ -273,7 +310,7 @@ export function ReviewEditor({
           <Card key={item.id}>
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-sm font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-                {isIncident ? "Photo" : "Item"} {i + 1}
+                {isIncident || isIncoming ? "Photo" : "Item"} {i + 1}
               </h2>
             </div>
 
@@ -300,6 +337,33 @@ export function ReviewEditor({
                 className="mt-1 block w-full rounded-lg border border-black/[.12] bg-white px-3 py-2 text-sm text-[#111817] dark:border-white/[.18] dark:bg-zinc-900 dark:text-zinc-50"
               />
             </label>
+
+            {isIncoming && (
+              <fieldset className="mt-4">
+                <legend className="text-sm font-semibold text-[#111817] dark:text-zinc-50">
+                  Condition
+                </legend>
+                <div className="mt-2 grid grid-cols-4 overflow-hidden rounded-lg border border-black/[.12] dark:border-white/[.18]">
+                  {INSPECTION_CONDITIONS.map((condition) => (
+                    <button
+                      key={condition}
+                      type="button"
+                      aria-pressed={edit.condition === condition}
+                      onClick={() =>
+                        updateEdit(item.id, "condition", condition)
+                      }
+                      className={`min-h-10 border-r border-black/[.12] px-2 text-sm font-semibold capitalize last:border-r-0 dark:border-white/[.18] ${
+                        edit.condition === condition
+                          ? "bg-[#0072c6] text-white"
+                          : "bg-white text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
+                      }`}
+                    >
+                      {condition}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            )}
 
             <div className="mt-4">
               <div className="flex items-center justify-between gap-3">

@@ -5,6 +5,10 @@ import { after } from "next/server";
 import { auth } from "@/auth";
 import { polishComment } from "@/lib/commentPolish";
 import { uploadFileToFolder } from "@/lib/graph";
+import {
+  INSPECTION_CONDITIONS,
+  type InspectionCondition,
+} from "@/lib/incomingInspection";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 /** What the upload action returns — OneDrive identity only. */
@@ -102,6 +106,7 @@ export async function createReportedItem(
   area: string,
   comment: string,
   photos: ReportPhoto[],
+  condition?: InspectionCondition,
 ): Promise<{ id: string; area: string; comment: string }> {
   const session = await auth();
   if (!session) throw new Error("Not signed in.");
@@ -109,6 +114,12 @@ export async function createReportedItem(
 
   const trimmedArea = area.trim();
   if (!trimmedArea) throw new Error("Area is required.");
+  if (
+    condition !== undefined &&
+    !INSPECTION_CONDITIONS.includes(condition)
+  ) {
+    throw new Error("Choose a valid condition.");
+  }
 
   const sb = supabaseAdmin();
 
@@ -134,6 +145,7 @@ export async function createReportedItem(
         area: trimmedArea,
         comment: comment.trim(),
         original_comment: comment.trim(),
+        condition: condition ?? null,
         sort_order: count ?? 0,
       })
       .select("id, area, comment")

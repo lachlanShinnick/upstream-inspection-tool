@@ -23,6 +23,12 @@ export const REPORT_TYPES = {
     title: "Incident Report",
     folderSuffix: "Incident Report",
   },
+  incoming: {
+    label: "Incoming Inspection",
+    newLabel: "New Incoming Inspection Report",
+    title: "Incoming Inspection Report",
+    folderSuffix: "Incoming Inspection Report",
+  },
 } as const;
 
 export type ReportType = keyof typeof REPORT_TYPES;
