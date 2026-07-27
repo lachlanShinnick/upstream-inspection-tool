@@ -260,9 +260,11 @@ function Field({
   return (
     <label className="block text-sm font-semibold text-[#111817] dark:text-zinc-50">
       {label}
+      {/* No `required` attribute: the review editor saves through an action,
+          not a form submit, so it would never fire. The server revalidates
+          with validateIncomingDetails. */}
       <input
         type={type}
-        required
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={inputClass}

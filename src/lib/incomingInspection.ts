@@ -27,7 +27,7 @@ export type IncomingInspectionDetails = {
   fireServices: IncomingServiceRow[];
 };
 
-export const EMPTY_INCOMING_DETAILS: IncomingInspectionDetails = {
+const EMPTY_INCOMING_DETAILS: IncomingInspectionDetails = {
   streetAddress: "",
   suburb: "",
   propertyType: "",
@@ -63,16 +63,32 @@ function clean(value: unknown): string {
 
 function serviceRows(value: unknown, withLocation: boolean): IncomingServiceRow[] {
   if (!Array.isArray(value)) return [];
-  return value.map((row) => {
+  return value.map((row, index) => {
     const item =
       row && typeof row === "object" ? (row as Record<string, unknown>) : {};
     return {
-      id: clean(item.id) || crypto.randomUUID(),
+      // Rows saved by incomingDetailsToRow always carry an id. For older or
+      // hand-edited rows that don't, fall back to a positional id rather than
+      // a fresh UUID: this runs on every server render, and a new id each time
+      // would churn React keys and break edits keyed on it.
+      id: clean(item.id) || `${withLocation ? "hvac" : "fire"}-${index}`,
       type: clean(item.type),
       ...(withLocation ? { location: clean(item.location) } : {}),
       lastServiceDate: clean(item.lastServiceDate),
     };
   });
+}
+
+/** Whether one HVAC/fire row has every field the report needs. */
+export function isServiceRowComplete(
+  row: IncomingServiceRow,
+  withLocation: boolean,
+): boolean {
+  return Boolean(
+    clean(row.type) &&
+      clean(row.lastServiceDate) &&
+      (!withLocation || clean(row.location)),
+  );
 }
 
 export function incomingDetailsFromRow(

@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -16,6 +23,7 @@ import {
 import {
   type IncomingInspectionDetails,
   type IncomingServiceRow,
+  isServiceRowComplete,
   validateIncomingDetails,
 } from "@/lib/incomingInspection";
 import { AppShell, Card } from "@/app/ui";
@@ -109,27 +117,48 @@ export function IncomingInspectionScreen({
   initialObservations: IncomingObservation[];
 }) {
   const router = useRouter();
-  const [restoredDetails] = useState(() =>
+  // False on the server and throughout hydration, true immediately after. That
+  // lets the first client render match the server HTML while still picking up
+  // a localStorage draft right afterwards. Reading the draft directly during
+  // the first render would diverge the client tree from the server's -- and
+  // since setupComplete derives from it, that divergence is a whole different
+  // screen, not a stray attribute.
+  const hydrated = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+  const [draftDetails] = useState(() =>
     readDetailsDraft(inspectionId, initialDetails),
   );
-  const [details, setDetails] = useState(restoredDetails);
-  const [setupComplete, setSetupComplete] = useState(() =>
-    requiredSetup(restoredDetails),
-  );
+  const [edited, setEdited] = useState<IncomingInspectionDetails | null>(null);
+  const details = edited ?? (hydrated ? draftDetails : initialDetails);
+
+  // Both derive from the details, then latch: saving the setup or revealing the
+  // electrical fields keeps them open even if a field is cleared afterwards.
+  const [setupSaved, setSetupSaved] = useState(false);
+  const [electricalOpen, setElectricalOpen] = useState(false);
+  const setupComplete = setupSaved || requiredSetup(details);
+  const showElectrical = electricalOpen || requiredElectrical(details);
+
   const [editingSetup, setEditingSetup] = useState(false);
-  const [showElectrical, setShowElectrical] = useState(() =>
-    requiredElectrical(restoredDetails),
-  );
   const [observations, setObservations] = useState(initialObservations);
   const [saving, startSaving] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  // Snapshot of what the server already holds. The autosave effect compares
+  // against this so neither the initial mount nor the re-render that follows
+  // an explicit save queues a redundant write.
+  const savedSnapshotRef = useRef(JSON.stringify(initialDetails));
 
   const missing = useMemo(() => validateIncomingDetails(details), [details]);
   const ready = missing.length === 0;
 
   useEffect(() => {
     const snapshot = JSON.stringify(details);
+    // Already persisted -- nothing to draft or push.
+    if (snapshot === savedSnapshotRef.current) return;
+
     try {
       window.localStorage.setItem(
         detailsDraftKey(inspectionId),
@@ -142,6 +171,7 @@ export function IncomingInspectionScreen({
     const timer = window.setTimeout(() => {
       void saveIncomingDetails(inspectionId, details)
         .then(() => {
+          savedSnapshotRef.current = snapshot;
           if (
             window.localStorage.getItem(detailsDraftKey(inspectionId)) ===
             snapshot
@@ -160,7 +190,7 @@ export function IncomingInspectionScreen({
     key: K,
     value: IncomingInspectionDetails[K],
   ) {
-    setDetails((current) => ({ ...current, [key]: value }));
+    setEdited({ ...details, [key]: value });
     setSavedNote(null);
   }
 
@@ -170,12 +200,13 @@ export function IncomingInspectionScreen({
     startSaving(async () => {
       try {
         await saveIncomingDetails(inspectionId, nextDetails);
+        savedSnapshotRef.current = JSON.stringify(nextDetails);
         try {
           window.localStorage.removeItem(detailsDraftKey(inspectionId));
         } catch {
           // The server copy is authoritative once this save succeeds.
         }
-        setDetails(nextDetails);
+        setEdited(nextDetails);
         setSavedNote("Information saved.");
         afterSave?.();
       } catch (reason) {
@@ -192,7 +223,7 @@ export function IncomingInspectionScreen({
       return;
     }
     save(details, () => {
-      setSetupComplete(true);
+      setSetupSaved(true);
       setEditingSetup(false);
     });
   }
@@ -372,7 +403,7 @@ export function IncomingInspectionScreen({
           {!showElectrical ? (
             <button
               type="button"
-              onClick={() => setShowElectrical(true)}
+              onClick={() => setElectricalOpen(true)}
               className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg bg-[#0072c6] px-4 text-sm font-semibold text-white"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
@@ -624,7 +655,11 @@ function ServiceSection({
 }) {
   return (
     <Card>
-      <SectionHeading title={title} complete icon={icon} />
+      <SectionHeading
+        title={title}
+        complete={rows.every((row) => isServiceRowComplete(row, withLocation))}
+        icon={icon}
+      />
       {rows.length === 0 ? (
         <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
           None added.
@@ -704,10 +739,11 @@ function Field({
   return (
     <label className={labelClass}>
       {label}
+      {/* No `required` attribute: nothing here submits a form, so it would
+          never fire. validateIncomingDetails is what gates generation. */}
       <input
         type={type}
         value={value}
-        required
         inputMode={inputMode}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}

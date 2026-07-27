@@ -60,7 +60,7 @@ export default async function GeneratePage({
   // Counts for the summary.
   const { data: items } = await sb
     .from("action_items")
-    .select("id")
+    .select("id, area, condition")
     .eq("inspection_id", id);
   const itemCount = items?.length ?? 0;
 
@@ -101,6 +101,10 @@ export default async function GeneratePage({
   const alreadyGenerated = inspection.status === "generated";
   const report = reportTypeInfo(inspection.report_type);
   let incomingMissing: string[] = [];
+  // renderReportDocx refuses to build an incoming report whose photos aren't
+  // all rated, so check it here too -- otherwise the button reads as ready and
+  // only fails on click.
+  let missingConditions: string[] = [];
   if (isIncoming) {
     const { data: incomingRow } = await sb
       .from("incoming_inspection_details")
@@ -113,6 +117,9 @@ export default async function GeneratePage({
         inspection.property_name,
       ),
     );
+    missingConditions = (items ?? [])
+      .filter((item) => !item.condition)
+      .map((item) => item.area);
   }
   const hasContent = isIncident
     ? itemCount > 0 || noteCount > 0
@@ -120,10 +127,15 @@ export default async function GeneratePage({
       ? true
       : itemCount > 0;
   const canGenerate =
-    hasContent && pendingPhotoCount === 0 && incomingMissing.length === 0;
+    hasContent &&
+    pendingPhotoCount === 0 &&
+    incomingMissing.length === 0 &&
+    missingConditions.length === 0;
 
   const disabledReason = incomingMissing.length > 0
     ? `Complete the required information first: ${incomingMissing.join(", ")}.`
+    : missingConditions.length > 0
+    ? `Choose a condition for: ${missingConditions.join(", ")}.`
     : !hasContent
     ? isIncident
       ? "Add at least one note or photo before generating."
