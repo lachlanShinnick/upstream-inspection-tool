@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Camera,
@@ -81,6 +81,7 @@ export function IncomingInspectionScreen({
   initialDetails: IncomingInspectionDetails;
   initialObservations: IncomingObservation[];
 }) {
+  const router = useRouter();
   const [details, setDetails] = useState(initialDetails);
   const [setupComplete, setSetupComplete] = useState(() =>
     requiredSetup(initialDetails),
@@ -131,6 +132,10 @@ export function IncomingInspectionScreen({
       setSetupComplete(true);
       setEditingSetup(false);
     });
+  }
+
+  function saveAndNavigate(href: string) {
+    save(details, () => router.push(href));
   }
 
   function updateService(
@@ -232,10 +237,17 @@ export function IncomingInspectionScreen({
             Dashboard
           </NavLink>
           {ready ? (
-            <NavLink href={`/inspect/${inspectionId}/generate`}>
+            <button
+              type="button"
+              onClick={() =>
+                saveAndNavigate(`/inspect/${inspectionId}/generate`)
+              }
+              disabled={saving}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-black/[.04] hover:text-[#111817] disabled:opacity-60 dark:text-zinc-300 dark:hover:bg-white/[.08] dark:hover:text-white"
+            >
               <Check className="h-4 w-4" aria-hidden="true" />
               Review &amp; generate
-            </NavLink>
+            </button>
           ) : null}
         </>
       }
@@ -358,13 +370,17 @@ export function IncomingInspectionScreen({
             icon={<Camera className="h-5 w-5" aria-hidden="true" />}
           />
           <div className="mt-4">
-            <Link
-              href={`/inspect/${inspectionId}/capture`}
+            <button
+              type="button"
+              onClick={() =>
+                saveAndNavigate(`/inspect/${inspectionId}/capture`)
+              }
+              disabled={saving}
               className="inline-flex min-h-12 items-center gap-2 rounded-lg bg-[#0072c6] px-5 text-sm font-semibold text-white"
             >
               <Camera className="h-4 w-4" aria-hidden="true" />
-              Take inspection photo
-            </Link>
+              {saving ? "Saving..." : "Take inspection photo"}
+            </button>
           </div>
           {observations.length === 0 ? (
             <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
