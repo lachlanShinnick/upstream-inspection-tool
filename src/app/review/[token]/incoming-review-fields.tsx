@@ -1,27 +1,90 @@
 "use client";
 
-import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Plus, Sparkles, Trash2, Undo2 } from "lucide-react";
 import {
   type IncomingInspectionDetails,
   type IncomingServiceRow,
 } from "@/lib/incomingInspection";
 import { Card } from "@/app/review/ui";
+import { regenerateCommentSuggestion } from "./actions";
 
 const inputClass =
   "mt-1 block min-h-10 w-full rounded-lg border border-black/[.12] bg-white px-3 py-2 text-sm text-[#111817] dark:border-white/[.18] dark:bg-zinc-900 dark:text-zinc-50";
 
 export function IncomingReviewFields({
+  token,
   details,
   onChange,
 }: {
+  token: string;
   details: IncomingInspectionDetails;
   onChange: (details: IncomingInspectionDetails) => void;
 }) {
+  // Text each comment had before a suggestion replaced it, so the reviewer can
+  // put it back. Only set once per comment -- repeated suggestions still revert
+  // to what the inspector originally wrote.
+  const [preSuggestion, setPreSuggestion] = useState<Map<string, string>>(
+    new Map(),
+  );
+  const [suggesting, setSuggesting] = useState<Set<string>>(new Set());
+  const [aiError, setAiError] = useState<string | null>(null);
+
   function patch<K extends keyof IncomingInspectionDetails>(
     key: K,
     value: IncomingInspectionDetails[K],
   ) {
     onChange({ ...details, [key]: value });
+  }
+
+  function setCommentText(id: string, text: string) {
+    patch(
+      "otherComments",
+      details.otherComments.map((item) =>
+        item.id === id ? { ...item, text } : item,
+      ),
+    );
+  }
+
+  async function suggestComment(id: string, current: string) {
+    if (!current.trim()) {
+      setAiError("Write the comment first, then ask for a suggestion.");
+      return;
+    }
+    setAiError(null);
+    setSuggesting((prev) => new Set(prev).add(id));
+    try {
+      const generated = await regenerateCommentSuggestion(token, current);
+      if (generated) {
+        setPreSuggestion((prev) =>
+          prev.has(id) ? prev : new Map(prev).set(id, current),
+        );
+        setCommentText(id, generated);
+      } else {
+        setAiError("No AI suggestion could be generated for this comment.");
+      }
+    } catch (e) {
+      setAiError(
+        e instanceof Error ? e.message : "Couldn't generate a suggestion.",
+      );
+    } finally {
+      setSuggesting((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  function revertComment(id: string) {
+    const original = preSuggestion.get(id);
+    if (original === undefined) return;
+    setCommentText(id, original);
+    setPreSuggestion((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
   }
 
   function updateService(
@@ -182,49 +245,76 @@ export function IncomingReviewFields({
             Add
           </button>
         </div>
+        {aiError && (
+          <p role="alert" className="mt-3 text-sm text-red-600">
+            {aiError}
+          </p>
+        )}
         {details.otherComments.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-500">None recorded.</p>
         ) : (
-          <ul className="mt-4 space-y-3">
-            {details.otherComments.map((row, index) => (
-              <li key={row.id} className="flex items-start gap-3">
-                <span className="mt-2.5 w-5 shrink-0 text-sm font-semibold text-zinc-400">
-                  {index + 1}.
-                </span>
-                <label className="flex-1">
-                  <span className="sr-only">Comment {index + 1}</span>
-                  <textarea
-                    value={row.text}
-                    rows={2}
-                    onChange={(event) =>
+          <ul className="mt-4 space-y-4">
+            {details.otherComments.map((row, index) => {
+              const busy = suggesting.has(row.id);
+              const reverted = preSuggestion.has(row.id);
+              return (
+                <li key={row.id} className="flex items-start gap-3">
+                  <span className="mt-2.5 w-5 shrink-0 text-sm font-semibold text-zinc-400">
+                    {index + 1}.
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <label>
+                      <span className="sr-only">Comment {index + 1}</span>
+                      <textarea
+                        value={row.text}
+                        rows={2}
+                        onChange={(event) =>
+                          setCommentText(row.id, event.target.value)
+                        }
+                        className={`${inputClass} mt-0 resize-y`}
+                      />
+                    </label>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => suggestComment(row.id, row.text)}
+                        disabled={busy}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-black/[.12] px-3 text-xs font-semibold text-zinc-600 transition-colors hover:bg-black/[.04] disabled:cursor-default disabled:opacity-50 dark:border-white/[.18] dark:text-zinc-300 dark:hover:bg-white/[.08]"
+                      >
+                        <Sparkles className="h-3 w-3" aria-hidden="true" />
+                        {busy ? "Generating…" : "AI suggestion"}
+                      </button>
+                      {reverted && (
+                        <button
+                          type="button"
+                          onClick={() => revertComment(row.id)}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-zinc-500 transition-colors hover:bg-black/[.04] hover:text-zinc-700 dark:hover:bg-white/[.08] dark:hover:text-zinc-200"
+                        >
+                          <Undo2 className="h-3 w-3" aria-hidden="true" />
+                          Revert
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
                       patch(
                         "otherComments",
-                        details.otherComments.map((item) =>
-                          item.id === row.id
-                            ? { ...item, text: event.target.value }
-                            : item,
+                        details.otherComments.filter(
+                          (item) => item.id !== row.id,
                         ),
                       )
                     }
-                    className={`${inputClass} mt-0 resize-y`}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    patch(
-                      "otherComments",
-                      details.otherComments.filter((item) => item.id !== row.id),
-                    )
-                  }
-                  title={`Remove comment ${index + 1}`}
-                  aria-label={`Remove comment ${index + 1}`}
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-red-50 hover:text-red-600"
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                </button>
-              </li>
-            ))}
+                    title={`Remove comment ${index + 1}`}
+                    aria-label={`Remove comment ${index + 1}`}
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </Card>

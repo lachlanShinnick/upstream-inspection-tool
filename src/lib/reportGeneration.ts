@@ -278,6 +278,11 @@ export async function renderReportDocx(
         type: service.type,
         last_service_date: displayServiceDate(service.lastServiceDate),
       })),
+      // HVAC and Fire Services are optional sections. Their templates wrap the
+      // whole table (and its spacer) in these flags so an empty one renders
+      // nothing at all, instead of a heading with no rows under it.
+      has_hvac_units: details.hvacUnits.length > 0,
+      has_fire_services: details.fireServices.length > 0,
       other_comments: otherComments,
       // The template wraps the whole Other Comments table in this flag, so an
       // inspection without comments renders no table at all rather than a bare

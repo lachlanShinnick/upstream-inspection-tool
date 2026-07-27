@@ -131,6 +131,25 @@ export async function regenerateSuggestion(
   return polished;
 }
 
+/**
+ * Polish one incoming-inspection "Other Comments" entry.
+ *
+ * Unlike action items and notes there's nowhere to persist this: comments live
+ * in a jsonb array on incoming_inspection_details, and writing back would mean
+ * a read-modify-write that could clobber the reviewer's other unsaved edits.
+ * The suggestion is returned for the reviewer to accept, and becomes the
+ * comment's own text when they save.
+ */
+export async function regenerateCommentSuggestion(
+  token: string,
+  text: string,
+): Promise<string | null> {
+  const scope = await validateReviewToken(token);
+  if (!scope) throw new Error("This review link has expired.");
+
+  return polishComment(text);
+}
+
 /** Same as {@link regenerateSuggestion}, for an incident-report note. */
 export async function regenerateNoteSuggestion(
   token: string,

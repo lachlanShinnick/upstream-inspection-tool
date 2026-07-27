@@ -223,6 +223,7 @@ export function ReviewEditor({
 
       {isIncoming && incomingEdit && (
         <IncomingReviewFields
+          token={token}
           details={incomingEdit}
           onChange={(next) => {
             setIncomingEdit(next);
