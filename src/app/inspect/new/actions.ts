@@ -2,9 +2,28 @@
 
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { findOrCreateSubfolder } from "@/lib/graph";
+import { findOrCreateSubfolder, listSubfolders, type GraphFolder } from "@/lib/graph";
 import { parseReportType, REPORT_TYPES, type ReportType } from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+
+/**
+ * List the individual properties inside a portfolio folder (e.g. CTTG),
+ * which holds several properties rather than being one itself.
+ */
+export async function listPortfolioProperties(
+  folderId: string,
+): Promise<GraphFolder[]> {
+  const session = await auth();
+  if (!session) throw new Error("Not signed in.");
+
+  const driveId = process.env.PROPERTIES_DRIVE_ID;
+  if (!driveId) {
+    throw new Error("PROPERTIES_DRIVE_ID is not set.");
+  }
+
+  const children = await listSubfolders(driveId, folderId);
+  return children.sort((a, b) => a.name.localeCompare(b.name));
+}
 
 /** Today's date in Adelaide, as both an ISO date and the folder-name format. */
 function adelaideToday(reportType: ReportType) {

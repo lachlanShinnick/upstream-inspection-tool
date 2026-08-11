@@ -1,11 +1,20 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { ArrowRight, Building2, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Search } from "lucide-react";
 import type { GraphFolder } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
 import type { ReportType } from "@/lib/reportTypes";
-import { startInspection } from "./actions";
+import { listPortfolioProperties, startInspection } from "./actions";
+
+// CTTG is a portfolio folder holding several individual properties rather
+// than being one itself, so opening it drills one level down instead of
+// starting an inspection there directly.
+const PORTFOLIO_FOLDER_NAME = "cttg";
+
+function isPortfolioFolder(p: GraphFolder): boolean {
+  return p.name.trim().toLowerCase() === PORTFOLIO_FOLDER_NAME;
+}
 
 export function PropertyPicker({
   properties,
@@ -19,13 +28,47 @@ export function PropertyPicker({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const [portfolio, setPortfolio] = useState<GraphFolder | null>(null);
+  const [portfolioChildren, setPortfolioChildren] = useState<GraphFolder[]>([]);
+  const [loadingPortfolio, setLoadingPortfolio] = useState(false);
+
+  const list = portfolio ? portfolioChildren : properties;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return properties;
-    return properties.filter((p) => p.name.toLowerCase().includes(q));
-  }, [properties, query]);
+    if (!q) return list;
+    return list.filter((p) => p.name.toLowerCase().includes(q));
+  }, [list, query]);
+
+  function openPortfolio(p: GraphFolder) {
+    setError(null);
+    setQuery("");
+    setPortfolio(p);
+    setLoadingPortfolio(true);
+    startTransition(async () => {
+      try {
+        const children = await listPortfolioProperties(p.id);
+        setPortfolioChildren(children);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn’t load properties.");
+        setPortfolio(null);
+      } finally {
+        setLoadingPortfolio(false);
+      }
+    });
+  }
+
+  function backToProperties() {
+    setPortfolio(null);
+    setPortfolioChildren([]);
+    setQuery("");
+    setError(null);
+  }
 
   function choose(p: GraphFolder) {
+    if (!portfolio && isPortfolioFolder(p)) {
+      openPortfolio(p);
+      return;
+    }
     setError(null);
     setPendingId(p.id);
     startTransition(async () => {
@@ -41,6 +84,17 @@ export function PropertyPicker({
 
   return (
     <div className="w-full">
+      {portfolio && (
+        <button
+          type="button"
+          onClick={backToProperties}
+          className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#0072c6] hover:underline"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Back to properties
+        </button>
+      )}
+
       <div className="relative">
         <Search
           className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-400"
@@ -50,7 +104,11 @@ export function PropertyPicker({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search properties"
+          placeholder={
+            portfolio
+              ? `Search ${formatPropertyName(portfolio.name)} properties`
+              : "Search properties"
+          }
           className="h-12 w-full rounded-lg border border-black/[.10] bg-white pl-11 pr-4 text-base text-[#111817] outline-none shadow-sm shadow-black/[.02] transition-colors placeholder:text-zinc-400 focus:border-[#0072c6] dark:border-white/[.14] dark:bg-zinc-950 dark:text-zinc-50"
         />
       </div>
@@ -64,53 +122,64 @@ export function PropertyPicker({
         </p>
       )}
 
-      <ul className="mt-4 divide-y divide-black/[.06] overflow-hidden rounded-lg border border-black/[.08] bg-white shadow-sm shadow-black/[.03] dark:divide-white/[.08] dark:border-white/[.12] dark:bg-zinc-950">
-        {filtered.map((p) => {
-          const busy = isPending && pendingId === p.id;
-          return (
-            <li key={p.id}>
-              <button
-                type="button"
-                onClick={() => choose(p)}
-                disabled={isPending}
-                className="group flex w-full items-center justify-between gap-4 bg-white px-4 py-4 text-left transition-colors hover:bg-[#f6f7f5] disabled:opacity-50 dark:bg-zinc-950 dark:hover:bg-white/[.05]"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#eef5f9] text-[#0072c6] dark:bg-sky-400/10 dark:text-sky-300">
-                    <Building2 className="h-5 w-5" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-base font-semibold text-[#111817] dark:text-zinc-50">
-                      {formatPropertyName(p.name)}
+      {loadingPortfolio ? (
+        <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">
+          Loading {formatPropertyName(portfolio?.name ?? "")} properties…
+        </p>
+      ) : (
+        <ul className="mt-4 divide-y divide-black/[.06] overflow-hidden rounded-lg border border-black/[.08] bg-white shadow-sm shadow-black/[.03] dark:divide-white/[.08] dark:border-white/[.12] dark:bg-zinc-950">
+          {filtered.map((p) => {
+            const opensPortfolio = !portfolio && isPortfolioFolder(p);
+            const busy = isPending && pendingId === p.id;
+            return (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => choose(p)}
+                  disabled={isPending}
+                  className="group flex w-full items-center justify-between gap-4 bg-white px-4 py-4 text-left transition-colors hover:bg-[#f6f7f5] disabled:opacity-50 dark:bg-zinc-950 dark:hover:bg-white/[.05]"
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#eef5f9] text-[#0072c6] dark:bg-sky-400/10 dark:text-sky-300">
+                      <Building2 className="h-5 w-5" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-base font-semibold text-[#111817] dark:text-zinc-50">
+                        {formatPropertyName(p.name)}
+                      </span>
                     </span>
                   </span>
-                </span>
-                <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold text-[#0072c6]">
-                  <span className="hidden sm:inline">
-                    {busy ? "Creating..." : "Start inspection"}
+                  <span className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold text-[#0072c6]">
+                    <span className="hidden sm:inline">
+                      {opensPortfolio
+                        ? "Open"
+                        : busy
+                          ? "Creating..."
+                          : "Start inspection"}
+                    </span>
+                    {busy ? (
+                      <span
+                        className="h-4 w-4 animate-spin rounded-full border-2 border-[#0072c6] border-t-transparent"
+                        aria-label="Creating inspection"
+                      />
+                    ) : (
+                      <ArrowRight
+                        className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                        aria-hidden="true"
+                      />
+                    )}
                   </span>
-                  {busy ? (
-                    <span
-                      className="h-4 w-4 animate-spin rounded-full border-2 border-[#0072c6] border-t-transparent"
-                      aria-label="Creating inspection"
-                    />
-                  ) : (
-                    <ArrowRight
-                      className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-                      aria-hidden="true"
-                    />
-                  )}
-                </span>
-              </button>
+                </button>
+              </li>
+            );
+          })}
+          {filtered.length === 0 && (
+            <li className="bg-white px-4 py-10 text-center text-sm text-zinc-500 dark:bg-zinc-950">
+              No properties match “{query}”.
             </li>
-          );
-        })}
-        {filtered.length === 0 && (
-          <li className="bg-white px-4 py-10 text-center text-sm text-zinc-500 dark:bg-zinc-950">
-            No properties match “{query}”.
-          </li>
-        )}
-      </ul>
+          )}
+        </ul>
+      )}
     </div>
   );
 }
