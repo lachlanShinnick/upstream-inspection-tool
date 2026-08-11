@@ -66,25 +66,35 @@ export async function runGenerate(
   return result;
 }
 
-/**
- * Email Dave (the configured reviewer) a magic link to the unauthenticated
- * review page for this inspection, and save a copy to the sender's Sent Items.
- */
-export async function sendForReview(
-  inspectionId: string,
-): Promise<{ sent: true }> {
-  const session = await auth();
-  if (!session) throw new Error("Not signed in.");
-  const recipients = (process.env.REVIEW_RECIPIENT_EMAIL ?? "")
+/** Who a report can be sent to for approval, and which env var holds their address(es). */
+export type Approver = "dave" | "jackie";
+const APPROVER_ENV_VAR: Record<Approver, string> = {
+  dave: "REVIEW_RECIPIENT_EMAIL",
+  jackie: "REVIEWER_JACKIE_EMAIL",
+};
+const APPROVER_LABEL: Record<Approver, string> = { dave: "Dave", jackie: "Jackie" };
+
+function approverEmails(approver: Approver): string[] {
+  return (process.env[APPROVER_ENV_VAR[approver]] ?? "")
     .split(/[,;]/)
     .map((r) => r.trim())
     .filter(Boolean);
-  if (recipients.length === 0) {
-    throw new Error(
-      "No review recipient configured. Set REVIEW_RECIPIENT_EMAIL in .env.local.",
-    );
-  }
+}
 
+export async function approverConfigured(approver: Approver): Promise<boolean> {
+  return approverEmails(approver).length > 0;
+}
+
+/**
+ * Email the unauthenticated review page's magic link to `recipients`, and
+ * save a copy to the sender's Sent Items. Shared by the self-review step
+ * (inspector tidies their own wording) and the approval step (Dave/Jackie).
+ */
+async function emailReviewLink(
+  inspectionId: string,
+  recipients: string[],
+  intro: string,
+): Promise<void> {
   const { data: inspection, error } = await supabaseAdmin()
     .from("inspections")
     .select("property_name, inspection_date, report_type, generated_doc_onedrive_id")
@@ -118,7 +128,9 @@ export async function sendForReview(
       body: {
         contentType: "Text",
         content: `Hi,
-The ${report.title.toLowerCase()} for ${propertyName} (${dateAU}) is ready for your review.
+The ${report.title.toLowerCase()} for ${propertyName} (${dateAU}) is ready.
+
+${intro}
 
 Review, edit and download it here: ${reviewUrl}
 
@@ -128,5 +140,45 @@ Thanks`,
     },
     saveToSentItems: true,
   });
+}
+
+/**
+ * Email the report's own inspector a magic link to review and tidy up their
+ * wording on desktop, before it goes to Dave or Jackie for approval.
+ */
+export async function sendForSelfReview(
+  inspectionId: string,
+): Promise<{ sent: true }> {
+  const session = await auth();
+  if (!session) throw new Error("Not signed in.");
+  const email = session.user?.email;
+  if (!email) throw new Error("No email address on your signed-in account.");
+
+  await emailReviewLink(
+    inspectionId,
+    [email],
+    "Give the wording a once-over on desktop and tidy up any comments, then send it on to Dave or Jackie for approval.",
+  );
+  return { sent: true };
+}
+
+/**
+ * Email Dave or Jackie a magic link to the unauthenticated review page for
+ * this inspection, for final approval.
+ */
+export async function sendForReview(
+  inspectionId: string,
+  approver: Approver,
+): Promise<{ sent: true }> {
+  const session = await auth();
+  if (!session) throw new Error("Not signed in.");
+  const recipients = approverEmails(approver);
+  if (recipients.length === 0) {
+    throw new Error(
+      `No email configured for ${APPROVER_LABEL[approver]}. Set ${APPROVER_ENV_VAR[approver]} in .env.local.`,
+    );
+  }
+
+  await emailReviewLink(inspectionId, recipients, "It's ready for your review and approval.");
   return { sent: true };
 }

@@ -93,6 +93,7 @@ export function CaptureScreen({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const trackRef = useRef<MediaStreamTrack | null>(null);
   const drainingRef = useRef(false);
   const reportPhotosRef = useRef<ReportPhoto[]>([]);
 
@@ -101,6 +102,10 @@ export function CaptureScreen({
   const [initialDraft] = useState(() => readDraft(inspectionId));
 
   const [camError, setCamError] = useState<string | null>(null);
+  const [zoomRange, setZoomRange] = useState<{ min: number; max: number; step: number } | null>(
+    null,
+  );
+  const [zoom, setZoomState] = useState(1);
   const [mode, setMode] = useState<Mode>(initialDraft?.mode ?? "default");
   const [busy, setBusy] = useState(false);
 
@@ -160,6 +165,20 @@ export function CaptureScreen({
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => {});
         }
+
+        // Optical/sensor zoom, where the device exposes it (mainly Android
+        // Chrome). Not in the DOM lib types -- it's a non-standard
+        // MediaTrackCapabilities/Constraints extension -- hence the casts.
+        const track = stream.getVideoTracks()[0];
+        trackRef.current = track ?? null;
+        const caps = track?.getCapabilities?.() as
+          | (MediaTrackCapabilities & { zoom?: { min: number; max: number; step: number } })
+          | undefined;
+        if (caps?.zoom) {
+          setZoomRange(caps.zoom);
+          const settings = track.getSettings?.() as (MediaTrackSettings & { zoom?: number }) | undefined;
+          setZoomState(settings?.zoom ?? caps.zoom.min);
+        }
       } catch {
         if (!cancelled) {
           setCamError(
@@ -174,6 +193,13 @@ export function CaptureScreen({
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
+
+  function handleZoomChange(value: number) {
+    setZoomState(value);
+    trackRef.current
+      ?.applyConstraints({ advanced: [{ zoom: value }] } as unknown as MediaTrackConstraints)
+      .catch(() => {});
+  }
 
   // --- Toast auto-dismiss ---
   useEffect(() => {
@@ -555,6 +581,23 @@ export function CaptureScreen({
 
       {/* Bottom controls */}
       <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/90 via-black/58 to-transparent px-4 pb-7 pt-14 sm:px-6">
+        {zoomRange && (
+          <div className="mx-auto mb-3 flex max-w-xl items-center gap-3 px-1">
+            <span className="w-9 shrink-0 text-right text-[11px] font-semibold tabular-nums text-white/70">
+              {zoom.toFixed(1)}x
+            </span>
+            <input
+              type="range"
+              min={zoomRange.min}
+              max={zoomRange.max}
+              step={zoomRange.step || 0.1}
+              value={zoom}
+              onChange={(e) => handleZoomChange(Number(e.target.value))}
+              aria-label="Camera zoom"
+              className="h-6 flex-1 accent-white"
+            />
+          </div>
+        )}
         {mode === "report" && (
           <p className="mx-auto mb-3 w-fit rounded-md bg-white/12 px-3 py-1.5 text-center text-xs font-semibold text-white/82 backdrop-blur">
             Collecting photos for a new {entryNoun}

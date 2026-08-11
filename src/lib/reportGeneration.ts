@@ -5,6 +5,7 @@ import ImageModule from "docxtemplater-image-module-free";
 import PizZip from "pizzip";
 import sharp from "sharp";
 import { auth } from "@/auth";
+import { safeFilenamePart } from "@/lib/downloadHeaders";
 import { downloadDriveItem, uploadFileToFolder } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
 import {
@@ -528,14 +529,13 @@ export async function generateReport(
     downloadDriveItem,
   );
 
-  // Upload the .docx into the inspection's dated subfolder.
-  const safeProperty = inspection.property_name.replace(/[\\/:*?"<>|]/g, "-");
-  const generatedAt = new Date()
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}Z$/, "Z");
-  const safeReportTitle = inspection.report_title.replace(/[\\/:*?"<>|]/g, "-");
-  const filename = `${safeReportTitle} - ${safeProperty} - ${inspection.inspection_date} - ${generatedAt}.docx`;
+  // Upload the .docx into the inspection's dated subfolder. Uploads go by
+  // path (PUT .../{filename}:/content), so regenerating just overwrites the
+  // same file in place -- no timestamp suffix needed for uniqueness, and
+  // leaving one off keeps the OneDrive filename short enough to open.
+  const filename = `${safeFilenamePart(inspection.report_title)} - ${safeFilenamePart(
+    inspection.property_name,
+  )} - ${inspection.inspection_date}.docx`;
   const uploaded = await uploadFileToFolder(
     inspection.onedrive_drive_id,
     inspection.onedrive_subfolder_id,

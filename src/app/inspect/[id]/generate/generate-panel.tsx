@@ -2,24 +2,30 @@
 
 import { useState, useTransition } from "react";
 import { Download, FileText, Mail, RefreshCw, Send } from "lucide-react";
-import { runGenerate, sendForReview } from "./actions";
+import {
+  runGenerate,
+  sendForReview,
+  sendForSelfReview,
+  type Approver,
+} from "./actions";
 
 export function GeneratePanel({
   inspectionId,
   canGenerate,
   disabledReason,
   initialDocWebUrl,
-  recipientConfigured,
+  approversConfigured,
 }: {
   inspectionId: string;
   canGenerate: boolean;
   disabledReason: string | null;
   initialDocWebUrl: string | null;
-  recipientConfigured: boolean;
+  approversConfigured: Record<Approver, boolean>;
 }) {
   const [docWebUrl, setDocWebUrl] = useState<string | null>(initialDocWebUrl);
   const [generating, startGenerate] = useTransition();
   const [sending, startSend] = useTransition();
+  const [approver, setApprover] = useState<Approver>("dave");
   const [error, setError] = useState<string | null>(null);
   const [sentNote, setSentNote] = useState<string | null>(null);
   const downloadHref = `/inspect/${inspectionId}/generate/download`;
@@ -36,13 +42,28 @@ export function GeneratePanel({
     });
   }
 
+  function sendSelfReview() {
+    setError(null);
+    setSentNote(null);
+    startSend(async () => {
+      try {
+        await sendForSelfReview(inspectionId);
+        setSentNote("Review link emailed to you.");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn’t send the report.");
+      }
+    });
+  }
+
   function send() {
     setError(null);
     setSentNote(null);
     startSend(async () => {
       try {
-        await sendForReview(inspectionId);
-        setSentNote("Review link emailed to Dave.");
+        await sendForReview(inspectionId, approver);
+        setSentNote(
+          `Review link emailed to ${approver === "dave" ? "Dave" : "Jackie"}.`,
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn’t send the report.");
       }
@@ -115,24 +136,51 @@ export function GeneratePanel({
             )}
           </div>
 
-          <div>
-            <button
-              type="button"
-              onClick={send}
-              disabled={sending}
-              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#0072c6] px-5 text-sm font-semibold text-white shadow-sm shadow-[#0072c6]/20 transition-colors hover:bg-[#005ea2] disabled:opacity-60"
-            >
-              <Send className="h-4 w-4" aria-hidden="true" />
-              {sending ? "Sending…" : "Send to Dave for review"}
-            </button>
-            {!recipientConfigured && (
-              <p className="mt-3 flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+          <div className="space-y-3">
+            <div>
+              <button
+                type="button"
+                onClick={sendSelfReview}
+                disabled={sending}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-black/[.12] bg-white px-4 text-sm font-semibold text-zinc-700 transition-colors hover:bg-black/[.04] disabled:opacity-60 dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-white/[.08]"
+              >
+                <Send className="h-4 w-4" aria-hidden="true" />
+                {sending ? "Sending…" : "Send to myself for review"}
+              </button>
+              <p className="mt-2 text-xs text-zinc-500">
+                Tidy up the wording on desktop before it goes for approval.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={approver}
+                onChange={(e) => setApprover(e.target.value as Approver)}
+                className="h-12 rounded-lg border border-black/[.12] bg-white px-3 text-sm font-semibold text-zinc-700 dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-300"
+              >
+                <option value="dave">Dave</option>
+                <option value="jackie">Jackie</option>
+              </select>
+              <button
+                type="button"
+                onClick={send}
+                disabled={sending}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#0072c6] px-5 text-sm font-semibold text-white shadow-sm shadow-[#0072c6]/20 transition-colors hover:bg-[#005ea2] disabled:opacity-60"
+              >
+                <Send className="h-4 w-4" aria-hidden="true" />
+                {sending ? "Sending…" : `Send to ${approver === "dave" ? "Dave" : "Jackie"} for approval`}
+              </button>
+            </div>
+            {!approversConfigured[approver] && (
+              <p className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
                 <Mail className="h-4 w-4" aria-hidden="true" />
-                Set REVIEW_RECIPIENT_EMAIL in .env.local first.
+                {approver === "dave"
+                  ? "Set REVIEW_RECIPIENT_EMAIL in .env.local first."
+                  : "Set REVIEWER_JACKIE_EMAIL in .env.local first."}
               </p>
             )}
             {sentNote && (
-              <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
                 {sentNote}
               </p>
             )}

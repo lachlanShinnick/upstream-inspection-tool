@@ -1,3 +1,4 @@
+import type { Viewport } from "next";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { auth } from "@/auth";
@@ -10,6 +11,16 @@ import {
   IncomingInspectionScreen,
   type IncomingObservation,
 } from "./incoming-screen";
+
+// The camera view has its own in-app zoom slider (see capture-screen.tsx).
+// Without this, pinching the screen triggers the browser's native page zoom
+// instead, which pans the fixed capture button out of view.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
 
 export default async function InspectionPage({
   params,

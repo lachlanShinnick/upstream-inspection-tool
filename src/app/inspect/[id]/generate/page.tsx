@@ -10,6 +10,7 @@ import {
 import { reportTypeInfo } from "@/lib/reportTypes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { AppShell, Card, NavLink } from "@/app/ui";
+import { approverConfigured } from "./actions";
 import { GeneratePanel } from "./generate-panel";
 
 function formatDateAU(iso: string): string {
@@ -216,7 +217,10 @@ export default async function GeneratePage({
             canGenerate={canGenerate}
             disabledReason={disabledReason}
             initialDocWebUrl={initialDocWebUrl}
-            recipientConfigured={!!process.env.REVIEW_RECIPIENT_EMAIL}
+            approversConfigured={{
+              dave: await approverConfigured("dave"),
+              jackie: await approverConfigured("jackie"),
+            }}
           />
         </Card>
       </div>
