@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import { polishComment } from "@/lib/commentPolish";
+import { getAppOnlyGraphClient, getGraphClient } from "@/lib/graph";
 import {
   INSPECTION_CONDITIONS,
   incomingDetailsToRow,
@@ -9,8 +11,24 @@ import {
   type IncomingInspectionDetails,
   type InspectionCondition,
 } from "@/lib/incomingInspection";
+import { formatPropertyName } from "@/lib/propertyName";
+import { reportTypeInfo } from "@/lib/reportTypes";
+import {
+  APPROVER_LABEL,
+  approverEmails,
+  approverEnvVar,
+  isApprover,
+  type Approver,
+} from "@/lib/reviewApprovers";
 import { validateReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+
+export type { Approver } from "@/lib/reviewApprovers";
+
+function formatDateAU(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  return `${Number(day)}/${month}/${year}`;
+}
 
 /** A reviewer's edit to one action item's location + comment. */
 export type ReviewEdit = {
@@ -103,6 +121,92 @@ export async function saveReviewByToken(
 
   revalidatePath(`/review/${token}`);
   return { saved: true };
+}
+
+/**
+ * Send the existing live review link to a fixed internal approver. The token
+ * supplies the inspection scope, so callers cannot choose another inspection
+ * ID. No document is regenerated or attached: the recipient sees the edits
+ * that saveReviewByToken persisted immediately before this action is called.
+ */
+export async function sendReviewForApprovalByToken(
+  token: string,
+  approver: Approver,
+): Promise<{ sent: true }> {
+  const scope = await validateReviewToken(token);
+  if (!scope) throw new Error("This review link has expired.");
+  if (!isApprover(approver)) throw new Error("Choose Dave or Jackie.");
+
+  const recipients = approverEmails(approver);
+  if (recipients.length === 0) {
+    throw new Error(
+      `No email configured for ${APPROVER_LABEL[approver]}. Set ${approverEnvVar(approver)} in .env.local.`,
+    );
+  }
+
+  const sb = supabaseAdmin();
+  const { data: inspection, error } = await sb
+    .from("inspections")
+    .select(
+      "property_name, inspection_date, report_type, generated_doc_onedrive_id, user_id",
+    )
+    .eq("id", scope.inspectionId)
+    .single();
+  if (error || !inspection) throw new Error("Inspection not found.");
+  if (!inspection.generated_doc_onedrive_id) {
+    throw new Error("Generate the report before sending it for approval.");
+  }
+
+  const appBaseUrl = process.env.APP_BASE_URL;
+  if (!appBaseUrl) {
+    throw new Error("Set APP_BASE_URL in .env.local to build the review link.");
+  }
+
+  const propertyName = formatPropertyName(inspection.property_name);
+  const dateAU = formatDateAU(inspection.inspection_date);
+  const report = reportTypeInfo(inspection.report_type);
+  const reviewUrl = new URL(`/review/${token}`, appBaseUrl).toString();
+  const subject = `${report.title} Ready — ${propertyName} — ${dateAU}`;
+  const message = {
+    subject,
+    toRecipients: recipients.map((address) => ({
+      emailAddress: { address },
+    })),
+    body: {
+      contentType: "Text",
+      content: `Hi,
+The ${report.title.toLowerCase()} for ${propertyName} (${dateAU}) has been updated and is ready for your review and approval.
+
+Open the live review to see the saved changes and continue editing: ${reviewUrl}
+
+This link doesn't require a Microsoft sign-in and works for 30 days.
+Thanks`,
+    },
+  };
+
+  const session = await auth();
+  if (session?.accessToken) {
+    const client = await getGraphClient();
+    await client.api("/me/sendMail").post({ message, saveToSentItems: true });
+  } else {
+    // A review link deliberately works without authentication. When it was
+    // opened in a signed-out browser, send as the inspection's owner using the
+    // app-only Graph client instead of forcing the reviewer through sign-in.
+    const { data: inspector } = await sb
+      .from("users")
+      .select("email")
+      .eq("id", inspection.user_id)
+      .single();
+    if (!inspector?.email) {
+      throw new Error("The inspector doesn't have an email address configured.");
+    }
+    const client = await getAppOnlyGraphClient();
+    await client
+      .api(`/users/${encodeURIComponent(inspector.email)}/sendMail`)
+      .post({ message, saveToSentItems: true });
+  }
+
+  return { sent: true };
 }
 
 /**

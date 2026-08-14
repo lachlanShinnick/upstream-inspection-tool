@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Sparkles } from "lucide-react";
+import { Mail, Send, Sparkles } from "lucide-react";
 import {
   INSPECTION_CONDITIONS,
   type IncomingInspectionDetails,
@@ -13,6 +13,8 @@ import {
   regenerateNoteSuggestion,
   regenerateSuggestion,
   saveReviewByToken,
+  sendReviewForApprovalByToken,
+  type Approver,
 } from "./actions";
 
 export type ReviewPhoto = { id: string; filename: string };
@@ -58,6 +60,7 @@ export function ReviewEditor({
   isIncident = false,
   isIncoming = false,
   incomingDetails,
+  approversConfigured,
 }: {
   token: string;
   items: ReviewItem[];
@@ -65,6 +68,7 @@ export function ReviewEditor({
   isIncident?: boolean;
   isIncoming?: boolean;
   incomingDetails?: IncomingInspectionDetails;
+  approversConfigured: Record<Approver, boolean>;
 }) {
   const [edits, setEdits] = useState(
     () =>
@@ -112,6 +116,8 @@ export function ReviewEditor({
   const [noteRegenerating, setNoteRegenerating] = useState<Set<string>>(new Set());
   const [regenerating, setRegenerating] = useState<Set<string>>(new Set());
   const [saving, startSave] = useTransition();
+  const [sending, startSend] = useTransition();
+  const [approver, setApprover] = useState<Approver>("dave");
   const [error, setError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
   const [incomingEdit, setIncomingEdit] = useState(incomingDetails);
@@ -206,6 +212,30 @@ export function ReviewEditor({
         setSavedNote("Changes saved.");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't save changes.");
+      }
+    });
+  }
+
+  function sendForApproval() {
+    setError(null);
+    setSavedNote(null);
+    startSend(async () => {
+      try {
+        const payload = Array.from(edits, ([id, edit]) => ({ id, ...edit }));
+        const notePayload = Array.from(noteEdits, ([id, text]) => ({ id, text }));
+
+        // Save what is currently on screen before forwarding the live review
+        // link, so the approver always opens the exact version just reviewed.
+        await saveReviewByToken(token, payload, notePayload, incomingEdit);
+        setSavedNote("Changes saved. Sending review link…");
+        await sendReviewForApprovalByToken(token, approver);
+        setSavedNote(
+          `Changes saved and review link emailed to ${
+            approver === "dave" ? "Dave" : "Jackie"
+          }.`,
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't send the review.");
       }
     });
   }
@@ -418,21 +448,60 @@ export function ReviewEditor({
         );
       })}
 
-      <div className="sticky bottom-4 flex items-center gap-3 rounded-lg border border-black/[.08] bg-white/95 p-4 shadow-sm backdrop-blur dark:border-white/[.12] dark:bg-zinc-950/95">
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving}
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#0072c6] px-5 text-sm font-semibold text-white shadow-sm shadow-[#0072c6]/20 transition-colors hover:bg-[#005ea2] disabled:opacity-60"
-        >
-          {saving ? "Saving…" : "Save changes"}
-        </button>
-        {savedNote && (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{savedNote}</p>
+      <div className="sticky bottom-4 rounded-lg border border-black/[.08] bg-white/95 p-4 shadow-sm backdrop-blur dark:border-white/[.12] dark:bg-zinc-950/95">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving || sending}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-black/[.12] bg-white px-5 text-sm font-semibold text-zinc-700 transition-colors hover:bg-black/[.04] disabled:opacity-60 dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-white/[.08]"
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={approver}
+              onChange={(event) =>
+                setApprover(event.target.value as Approver)
+              }
+              disabled={saving || sending}
+              aria-label="Approval recipient"
+              className="h-12 rounded-lg border border-black/[.12] bg-white px-3 text-sm font-semibold text-zinc-700 disabled:opacity-60 dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-300"
+            >
+              <option value="dave">Dave</option>
+              <option value="jackie">Jackie</option>
+            </select>
+            <button
+              type="button"
+              onClick={sendForApproval}
+              disabled={saving || sending || !approversConfigured[approver]}
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#0072c6] px-5 text-sm font-semibold text-white shadow-sm shadow-[#0072c6]/20 transition-colors hover:bg-[#005ea2] disabled:opacity-60"
+            >
+              <Send className="h-4 w-4" aria-hidden="true" />
+              {sending
+                ? "Saving & sending…"
+                : `Send to ${approver === "dave" ? "Dave" : "Jackie"} for approval`}
+            </button>
+          </div>
+
+          <p className="ml-auto text-sm text-zinc-500">
+            Sending saves these edits first.
+          </p>
+        </div>
+        {!approversConfigured[approver] && (
+          <p className="mt-2 flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+            <Mail className="h-4 w-4" aria-hidden="true" />
+            {approver === "dave"
+              ? "Set REVIEW_RECIPIENT_EMAIL in .env.local first."
+              : "Set REVIEWER_JACKIE_EMAIL in .env.local first."}
+          </p>
         )}
-        <p className="ml-auto text-sm text-zinc-500">
-          Downloads reflect the last saved version.
-        </p>
+        {savedNote && (
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+            {savedNote}
+          </p>
+        )}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { Download, FileText } from "lucide-react";
 import { incomingDetailsFromRow } from "@/lib/incomingInspection";
 import { formatPropertyName } from "@/lib/propertyName";
 import { reportTypeInfo } from "@/lib/reportTypes";
+import { approverEmails } from "@/lib/reviewApprovers";
 import { validateReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { Card, ReviewShell } from "@/app/review/ui";
@@ -158,6 +159,10 @@ export default async function ReviewPage({
           isIncident={isIncident}
           isIncoming={isIncoming}
           incomingDetails={incomingDetails}
+          approversConfigured={{
+            dave: approverEmails("dave").length > 0,
+            jackie: approverEmails("jackie").length > 0,
+          }}
         />
       )}
     </ReviewShell>

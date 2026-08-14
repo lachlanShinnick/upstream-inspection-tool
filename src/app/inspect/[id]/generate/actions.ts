@@ -7,8 +7,17 @@ import { getGraphClient } from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
 import { generateReport } from "@/lib/reportGeneration";
 import { reportTypeInfo } from "@/lib/reportTypes";
+import {
+  APPROVER_LABEL,
+  approverEmails,
+  approverEnvVar,
+  isApprover,
+  type Approver,
+} from "@/lib/reviewApprovers";
 import { mintOrReuseReviewToken } from "@/lib/reviewToken";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+
+export type { Approver } from "@/lib/reviewApprovers";
 
 function formatDateAU(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -64,21 +73,6 @@ export async function runGenerate(
   revalidatePath(`/inspect/${inspectionId}/generate`);
   revalidatePath("/dashboard");
   return result;
-}
-
-/** Who a report can be sent to for approval, and which env var holds their address(es). */
-export type Approver = "dave" | "jackie";
-const APPROVER_ENV_VAR: Record<Approver, string> = {
-  dave: "REVIEW_RECIPIENT_EMAIL",
-  jackie: "REVIEWER_JACKIE_EMAIL",
-};
-const APPROVER_LABEL: Record<Approver, string> = { dave: "Dave", jackie: "Jackie" };
-
-function approverEmails(approver: Approver): string[] {
-  return (process.env[APPROVER_ENV_VAR[approver]] ?? "")
-    .split(/[,;]/)
-    .map((r) => r.trim())
-    .filter(Boolean);
 }
 
 export async function approverConfigured(approver: Approver): Promise<boolean> {
@@ -172,10 +166,11 @@ export async function sendForReview(
 ): Promise<{ sent: true }> {
   const session = await auth();
   if (!session) throw new Error("Not signed in.");
+  if (!isApprover(approver)) throw new Error("Choose Dave or Jackie.");
   const recipients = approverEmails(approver);
   if (recipients.length === 0) {
     throw new Error(
-      `No email configured for ${APPROVER_LABEL[approver]}. Set ${APPROVER_ENV_VAR[approver]} in .env.local.`,
+      `No email configured for ${APPROVER_LABEL[approver]}. Set ${approverEnvVar(approver)} in .env.local.`,
     );
   }
 
