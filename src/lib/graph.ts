@@ -42,10 +42,9 @@ let appOnlyTokenCache: { token: string; expiresAt: number } | null = null;
  * Client-credentials (app-only) Graph token — no user session involved.
  * Used by the /review/[token] routes, which have no signed-in reviewer to
  * draw a delegated token from. Requires the Entra app registration to have
- * been granted the required Application permissions with admin consent
- * (Files.ReadWrite.All for files and Mail.Send for signed-out review
- * forwarding, separate from the Delegated permissions used for sign-in) —
- * without the relevant grant, that app-only Graph call will 403.
+ * been granted the Application permission Files.ReadWrite.All with admin
+ * consent (separate from the Delegated permissions used for sign-in) —
+ * without that grant, every app-only Graph file call below will 403.
  * Cached in-memory until ~60s before expiry; the cache only helps within a
  * single warm process, so on serverless this is effectively "one token
  * fetch per cold start," which is harmless.

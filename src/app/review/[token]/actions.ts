@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { polishComment } from "@/lib/commentPolish";
-import { getAppOnlyGraphClient, getGraphClient } from "@/lib/graph";
+import { getGraphClient } from "@/lib/graph";
 import {
   INSPECTION_CONDITIONS,
   incomingDetailsToRow,
@@ -132,10 +132,19 @@ export async function saveReviewByToken(
 export async function sendReviewForApprovalByToken(
   token: string,
   approver: Approver,
-): Promise<{ sent: true }> {
+): Promise<{ sent: true } | { sent: false; signInRequired: true }> {
   const scope = await validateReviewToken(token);
   if (!scope) throw new Error("This review link has expired.");
   if (!isApprover(approver)) throw new Error("Choose Dave or Jackie.");
+
+  // Editing remains available to anyone holding the review token, but email
+  // must be sent with a signed-in staff member's delegated Mail.Send grant.
+  // App-only sending as the inspector requires a separate tenant-wide
+  // Application permission and is commonly blocked with ErrorAccessDenied.
+  const session = await auth();
+  if (!session?.accessToken) {
+    return { sent: false, signInRequired: true };
+  }
 
   const recipients = approverEmails(approver);
   if (recipients.length === 0) {
@@ -148,7 +157,7 @@ export async function sendReviewForApprovalByToken(
   const { data: inspection, error } = await sb
     .from("inspections")
     .select(
-      "property_name, inspection_date, report_type, generated_doc_onedrive_id, user_id",
+      "property_name, inspection_date, report_type, generated_doc_onedrive_id",
     )
     .eq("id", scope.inspectionId)
     .single();
@@ -184,26 +193,20 @@ Thanks`,
     },
   };
 
-  const session = await auth();
-  if (session?.accessToken) {
-    const client = await getGraphClient();
+  const client = await getGraphClient();
+  try {
     await client.api("/me/sendMail").post({ message, saveToSentItems: true });
-  } else {
-    // A review link deliberately works without authentication. When it was
-    // opened in a signed-out browser, send as the inspection's owner using the
-    // app-only Graph client instead of forcing the reviewer through sign-in.
-    const { data: inspector } = await sb
-      .from("users")
-      .select("email")
-      .eq("id", inspection.user_id)
-      .single();
-    if (!inspector?.email) {
-      throw new Error("The inspector doesn't have an email address configured.");
+  } catch (error) {
+    const graphError = error as { code?: unknown; statusCode?: unknown };
+    if (
+      graphError?.code === "ErrorAccessDenied" ||
+      graphError?.statusCode === 403
+    ) {
+      throw new Error(
+        "Microsoft did not allow this account to send the email. Sign in with the inspector's Upstream Microsoft 365 account, or ask the Microsoft 365 administrator to grant delegated Mail.Send permission.",
+      );
     }
-    const client = await getAppOnlyGraphClient();
-    await client
-      .api(`/users/${encodeURIComponent(inspector.email)}/sendMail`)
-      .post({ message, saveToSentItems: true });
+    throw error;
   }
 
   return { sent: true };

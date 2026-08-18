@@ -228,7 +228,14 @@ export function ReviewEditor({
         // link, so the approver always opens the exact version just reviewed.
         await saveReviewByToken(token, payload, notePayload, incomingEdit);
         setSavedNote("Changes saved. Sending review link…");
-        await sendReviewForApprovalByToken(token, approver);
+        const result = await sendReviewForApprovalByToken(token, approver);
+        if (!result.sent && result.signInRequired) {
+          const returnTo = `/review/${token}`;
+          window.location.assign(
+            `/login?returnTo=${encodeURIComponent(returnTo)}&reauth=1`,
+          );
+          return;
+        }
         setSavedNote(
           `Changes saved and review link emailed to ${
             approver === "dave" ? "Dave" : "Jackie"
@@ -486,7 +493,7 @@ export function ReviewEditor({
           </div>
 
           <p className="ml-auto text-sm text-zinc-500">
-            Sending saves these edits first.
+            Sending saves these edits first. You may be asked to sign in.
           </p>
         </div>
         {!approversConfigured[approver] && (

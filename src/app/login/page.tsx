@@ -8,12 +8,23 @@ export default async function LoginPage({
   searchParams,
 }: {
   // In Next.js 16, searchParams is async.
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    returnTo?: string;
+    callbackUrl?: string;
+    reauth?: string;
+  }>;
 }) {
+  const { error, returnTo, callbackUrl, reauth } = await searchParams;
+  // Only permit a same-site path. This value becomes Auth.js's callback URL,
+  // so rejecting protocol-relative paths prevents an open redirect.
+  const requestedReturnTo = returnTo ?? callbackUrl;
+  const safeReturnTo =
+    requestedReturnTo?.startsWith("/") && !requestedReturnTo.startsWith("//")
+      ? requestedReturnTo
+      : "/dashboard";
   const session = await auth();
-  if (session) redirect("/dashboard");
-
-  const { error } = await searchParams;
+  if (session && reauth !== "1") redirect(safeReturnTo);
 
   // signIn callback returned false (wrong tenant) -> AccessDenied.
   const message =
@@ -64,7 +75,9 @@ export default async function LoginPage({
           <form
             action={async () => {
               "use server";
-              await signIn("microsoft-entra-id", { redirectTo: "/dashboard" });
+              await signIn("microsoft-entra-id", {
+                redirectTo: safeReturnTo,
+              });
             }}
             className="mt-8"
           >
