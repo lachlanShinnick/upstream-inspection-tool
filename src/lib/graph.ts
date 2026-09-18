@@ -92,7 +92,9 @@ export async function getAppOnlyGraphClient(): Promise<Client> {
   });
 }
 
-/** Upload a small (<4MB) file into a folder via a simple Graph PUT. Raw fetch
+/** Upload a file (Graph supports up to 250 MB) via a simple Graph PUT.
+ * https://learn.microsoft.com/graph/api/driveitem-put-content
+ * Camera JPEGs are capped at 3 MB on-device, so need no upload session. Raw fetch
  * is the most reliable path for binary bodies. Returns the created drive
  * item's id, name and webUrl. */
 async function uploadFileToFolderWithToken(

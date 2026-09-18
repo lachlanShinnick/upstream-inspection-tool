@@ -2,10 +2,11 @@
  * IndexedDB store for the offline capture queue. Photos are written here at
  * shutter time (blob included) and deleted only once OneDrive has confirmed
  * the upload AND nothing still references them; action-item saves are queued
- * the same way. localStorage is not an option — photo blobs are ~500KB each.
+ * the same way. localStorage is not an option — camera JPEGs can be up to 3MB.
  *
  * Client-only. Every function throws if IndexedDB is unavailable (rare:
- * some private-browsing modes); callers fall back to direct upload.
+ * some private-browsing modes). Capture must report a failed local save rather
+ * than claim success or depend on an immediate network upload.
  */
 
 export type QueuedPhoto = {

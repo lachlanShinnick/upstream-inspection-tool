@@ -35,6 +35,7 @@ import {
   INSPECTION_CONDITIONS,
   type InspectionCondition,
 } from "@/lib/incomingInspection";
+import { createPhotoCapture, openCamera } from "@/lib/cameraCapture";
 
 type Mode = "default" | "report";
 
@@ -94,6 +95,8 @@ export function CaptureScreen({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const trackRef = useRef<MediaStreamTrack | null>(null);
+  const photoCaptureRef = useRef<ReturnType<typeof createPhotoCapture> | null>(null);
+  const capturingRef = useRef(false);
   const drainingRef = useRef(false);
   const reportPhotosRef = useRef<ReportPhoto[]>([]);
 
@@ -152,10 +155,7 @@ export function CaptureScreen({
     let cancelled = false;
     async function start() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false,
-        });
+        const stream = await openCamera();
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -165,12 +165,14 @@ export function CaptureScreen({
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => {});
         }
+        if (cancelled) return;
 
         // Optical/sensor zoom, where the device exposes it (mainly Android
         // Chrome). Not in the DOM lib types -- it's a non-standard
         // MediaTrackCapabilities/Constraints extension -- hence the casts.
         const track = stream.getVideoTracks()[0];
         trackRef.current = track ?? null;
+        photoCaptureRef.current = track ? createPhotoCapture(track) : null;
         const caps = track?.getCapabilities?.() as
           | (MediaTrackCapabilities & { zoom?: { min: number; max: number; step: number } })
           | undefined;
@@ -190,6 +192,7 @@ export function CaptureScreen({
     start();
     return () => {
       cancelled = true;
+      photoCaptureRef.current = null;
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
@@ -369,39 +372,19 @@ export function CaptureScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inspectionId]);
 
-  /** Grab the current video frame, resize to 1920px long edge, encode JPEG. */
-  async function frameToJpeg(): Promise<{
-    blob: Blob;
-    width: number;
-    height: number;
-  } | null> {
-    const video = videoRef.current;
-    if (!video || !video.videoWidth) return null;
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-    const scale = Math.min(1, 1920 / Math.max(vw, vh));
-    const w = Math.round(vw * scale);
-    const h = Math.round(vh * scale);
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(video, 0, 0, w, h);
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.85),
-    );
-    return blob ? { blob, width: w, height: h } : null;
-  }
-
   async function capture() {
-    if (busy) return;
+    // Synchronous guard: two taps before React rerenders must not issue
+    // overlapping still captures on the same camera.
+    if (capturingRef.current) return;
+    capturingRef.current = true;
     setBusy(true);
     try {
-      const shot = await frameToJpeg();
-      if (!shot) throw new Error("Camera not ready.");
+      const video = videoRef.current;
+      const takePhoto = photoCaptureRef.current;
+      if (!video || !takePhoto) throw new Error("Camera not ready.");
       const localUuid = crypto.randomUUID();
       const takenAt = new Date().toISOString();
+      const shot = await takePhoto(video);
       const queued: QueuedPhoto = {
         localUuid,
         inspectionId,
@@ -436,6 +419,7 @@ export function CaptureScreen({
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Photo capture failed.");
     } finally {
+      capturingRef.current = false;
       setBusy(false);
     }
   }

@@ -9,8 +9,8 @@ const nextConfig: NextConfig = {
     "/review/**": ["./src/templates/**"],
   },
   experimental: {
-    // Resized photos are ~300KB, but allow headroom for the occasional larger
-    // capture sent through the upload server action.
+    // Camera JPEGs are capped at 3,000,000 bytes before entering IndexedDB.
+    // Keep headroom for multipart overhead and existing queued captures.
     serverActions: {
       bodySizeLimit: "8mb",
     },
