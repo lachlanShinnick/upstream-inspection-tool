@@ -211,6 +211,42 @@ export async function downloadDriveItemAppOnly(
   );
 }
 
+async function deleteDriveItemWithToken(
+  accessToken: string,
+  driveId: string,
+  fileId: string,
+): Promise<void> {
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${fileId}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  // 404 means it's already gone, which is the state the caller wanted.
+  if (!res.ok && res.status !== 404) {
+    let detail = "";
+    try {
+      detail = (await res.json())?.error?.message ?? "";
+    } catch {
+      /* empty body */
+    }
+    throw new Error(
+      `Delete failed (${res.status})${detail ? `: ${detail}` : ""}.`,
+    );
+  }
+}
+
+/** Delete a drive item, using the app-only Graph client for callers with no
+ * user session (the reviewer magic-link routes). */
+export async function deleteDriveItemAppOnly(
+  driveId: string,
+  fileId: string,
+): Promise<void> {
+  return deleteDriveItemWithToken(
+    await getAppOnlyAccessToken(),
+    driveId,
+    fileId,
+  );
+}
+
 async function downloadDriveItemAsPdfWithToken(
   accessToken: string,
   driveId: string,

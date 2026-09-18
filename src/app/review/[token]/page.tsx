@@ -8,6 +8,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { Card, ReviewShell } from "@/app/review/ui";
 import { ReviewEditor, type ReviewItem, type ReviewNote } from "./review-editor";
 
+// The "Save PDF to OneDrive" Server Action on this page renders the report,
+// re-downloads every photo and round-trips through Graph to convert and file
+// the PDF — well past the platform's 10s default. Page-level maxDuration sets
+// the timeout for every Server Action on the page (60s is the Vercel Hobby max).
+export const maxDuration = 60;
+
 function formatDateAU(iso: string): string {
   const [y, m, d] = iso.split("-");
   return `${Number(d)}/${m}/${y}`;

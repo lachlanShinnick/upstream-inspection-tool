@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import Docxtemplater from "docxtemplater";
@@ -6,7 +7,14 @@ import PizZip from "pizzip";
 import sharp from "sharp";
 import { auth } from "@/auth";
 import { safeFilenamePart } from "@/lib/downloadHeaders";
-import { downloadDriveItem, uploadFileToFolder } from "@/lib/graph";
+import {
+  deleteDriveItemAppOnly,
+  downloadDriveItem,
+  downloadDriveItemAppOnly,
+  downloadDriveItemAsPdfAppOnly,
+  uploadFileToFolder,
+  uploadFileToFolderAppOnly,
+} from "@/lib/graph";
 import { formatPropertyName } from "@/lib/propertyName";
 import {
   formatCondition,
@@ -513,6 +521,67 @@ export async function renderReportDocx(
 }
 
 /**
+ * The "Title - Property - YYYY-MM-DD" stem every file this report produces
+ * shares, so the .docx in OneDrive, the PDF filed beside it and both browser
+ * downloads all line up in the folder.
+ */
+export function reportBaseName(inspection: RenderedReport["inspection"]): string {
+  return `${safeFilenamePart(inspection.report_title)} - ${safeFilenamePart(
+    inspection.property_name,
+  )} - ${inspection.inspection_date}`;
+}
+
+/**
+ * Render the report from the inspection's *current* content and convert it to
+ * PDF. Graph's `?format=pdf` only works on a file that already lives in a
+ * drive, so the freshly-rendered .docx goes up under a throwaway name, gets
+ * converted, and is deleted again — the caller only ever sees PDF bytes, and
+ * the property's folder is left with no working copy in it. The name is
+ * per-call unique so two reviewers converting at once can't collide on (or
+ * delete) each other's scratch file.
+ *
+ * App-only Graph throughout, for the reviewer routes that have no session.
+ */
+export async function renderReportPdfAppOnly(inspectionId: string): Promise<{
+  pdf: Buffer;
+  inspection: RenderedReport["inspection"];
+  baseName: string;
+}> {
+  const { buffer, inspection } = await renderReportDocx(
+    inspectionId,
+    downloadDriveItemAppOnly,
+  );
+
+  const scratchName = `~converting (do not use) - ${randomUUID()}.docx`;
+  const scratch = await uploadFileToFolderAppOnly(
+    inspection.onedrive_drive_id,
+    inspection.onedrive_subfolder_id,
+    scratchName,
+    buffer,
+    DOCX_MIME,
+  );
+
+  try {
+    const pdf = await downloadDriveItemAsPdfAppOnly(
+      inspection.onedrive_drive_id,
+      scratch.id,
+    );
+    return { pdf, inspection, baseName: reportBaseName(inspection) };
+  } finally {
+    // Best effort: a failed cleanup leaves a clearly-named stray file behind,
+    // which shouldn't fail a conversion that otherwise worked.
+    try {
+      await deleteDriveItemAppOnly(inspection.onedrive_drive_id, scratch.id);
+    } catch (e) {
+      console.error(
+        "[reportGeneration] couldn't remove the scratch .docx:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+}
+
+/**
  * Inspector-facing entrypoint: session-gated, renders via renderReportDocx,
  * uploads the result into the inspection's dated OneDrive subfolder, and
  * marks the inspection generated. Unchanged behavior from before the
@@ -533,9 +602,7 @@ export async function generateReport(
   // path (PUT .../{filename}:/content), so regenerating just overwrites the
   // same file in place -- no timestamp suffix needed for uniqueness, and
   // leaving one off keeps the OneDrive filename short enough to open.
-  const filename = `${safeFilenamePart(inspection.report_title)} - ${safeFilenamePart(
-    inspection.property_name,
-  )} - ${inspection.inspection_date}.docx`;
+  const filename = `${reportBaseName(inspection)}.docx`;
   const uploaded = await uploadFileToFolder(
     inspection.onedrive_drive_id,
     inspection.onedrive_subfolder_id,

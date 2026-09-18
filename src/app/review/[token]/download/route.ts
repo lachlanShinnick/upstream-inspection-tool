@@ -1,10 +1,10 @@
-import { contentDisposition, safeFilenamePart } from "@/lib/downloadHeaders";
+import { contentDisposition } from "@/lib/downloadHeaders";
+import { downloadDriveItemAppOnly } from "@/lib/graph";
 import {
-  downloadDriveItemAppOnly,
-  downloadDriveItemAsPdfAppOnly,
-  uploadFileToFolderAppOnly,
-} from "@/lib/graph";
-import { renderReportDocx } from "@/lib/reportGeneration";
+  renderReportDocx,
+  renderReportPdfAppOnly,
+  reportBaseName,
+} from "@/lib/reportGeneration";
 import { validateReviewToken } from "@/lib/reviewToken";
 
 const DOCX_MIME =
@@ -38,45 +38,28 @@ export async function GET(
     new URL(request.url).searchParams.get("format")?.toLowerCase() === "pdf";
 
   try {
-    const { buffer, inspection } = await renderReportDocx(
-      scope.inspectionId,
-      downloadDriveItemAppOnly,
-    );
-    const baseName = `${safeFilenamePart(inspection.report_title)} - ${safeFilenamePart(
-      inspection.property_name,
-    )} - ${inspection.inspection_date}`;
-
-    if (!asPdf) {
-      return new Response(new Uint8Array(buffer), {
+    if (asPdf) {
+      const { pdf, baseName } = await renderReportPdfAppOnly(scope.inspectionId);
+      return new Response(new Uint8Array(pdf), {
         headers: {
           "Cache-Control": "no-store",
-          "Content-Disposition": contentDisposition(`${baseName}.docx`),
-          "Content-Type": DOCX_MIME,
+          "Content-Disposition": contentDisposition(`${baseName}.pdf`),
+          "Content-Type": "application/pdf",
         },
       });
     }
 
-    // Graph's ?format=pdf conversion only works on a file that already
-    // exists in a drive, so upload the freshly-rendered buffer to a fixed
-    // scratch filename (re-uploading overwrites in place — no clutter/growth
-    // per download) and convert that.
-    const scratchName = `Review Draft (working copy, do not use) - ${baseName}.docx`;
-    const uploaded = await uploadFileToFolderAppOnly(
-      inspection.onedrive_drive_id,
-      inspection.onedrive_subfolder_id,
-      scratchName,
-      buffer,
-      DOCX_MIME,
+    const { buffer, inspection } = await renderReportDocx(
+      scope.inspectionId,
+      downloadDriveItemAppOnly,
     );
-    const pdfBytes = await downloadDriveItemAsPdfAppOnly(
-      inspection.onedrive_drive_id,
-      uploaded.id,
-    );
-    return new Response(new Uint8Array(pdfBytes), {
+    return new Response(new Uint8Array(buffer), {
       headers: {
         "Cache-Control": "no-store",
-        "Content-Disposition": contentDisposition(`${baseName}.pdf`),
-        "Content-Type": "application/pdf",
+        "Content-Disposition": contentDisposition(
+          `${reportBaseName(inspection)}.docx`,
+        ),
+        "Content-Type": DOCX_MIME,
       },
     });
   } catch (e) {

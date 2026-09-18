@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Mail, Send, Sparkles } from "lucide-react";
+import { CloudUpload, Mail, Send, Sparkles } from "lucide-react";
 import {
   INSPECTION_CONDITIONS,
   type IncomingInspectionDetails,
@@ -12,6 +12,7 @@ import { IncomingReviewFields } from "./incoming-review-fields";
 import {
   regenerateNoteSuggestion,
   regenerateSuggestion,
+  savePdfToOneDriveByToken,
   saveReviewByToken,
   sendReviewForApprovalByToken,
   type Approver,
@@ -117,10 +118,16 @@ export function ReviewEditor({
   const [regenerating, setRegenerating] = useState<Set<string>>(new Set());
   const [saving, startSave] = useTransition();
   const [sending, startSend] = useTransition();
+  const [filing, startFile] = useTransition();
   const [approver, setApprover] = useState<Approver>("dave");
   const [error, setError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [filedPdf, setFiledPdf] = useState<{
+    filename: string;
+    webUrl: string;
+  } | null>(null);
   const [incomingEdit, setIncomingEdit] = useState(incomingDetails);
+  const busy = saving || sending || filing;
 
   function updateEdit(
     id: string,
@@ -134,6 +141,7 @@ export function ReviewEditor({
       return next;
     });
     setSavedNote(null);
+    setFiledPdf(null);
   }
 
   function chooseOriginal(item: ReviewItem) {
@@ -171,6 +179,7 @@ export function ReviewEditor({
   function updateNote(id: string, value: string) {
     setNoteEdits((prev) => new Map(prev).set(id, value));
     setSavedNote(null);
+    setFiledPdf(null);
   }
 
   async function chooseNoteAi(note: ReviewNote) {
@@ -212,6 +221,33 @@ export function ReviewEditor({
         setSavedNote("Changes saved.");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Couldn't save changes.");
+      }
+    });
+  }
+
+  /**
+   * File the finished PDF straight into the property's OneDrive inspection
+   * folder. Saves whatever is on screen first, so what lands in the folder is
+   * the version the approver is looking at rather than the last saved one.
+   */
+  function saveToOneDrive() {
+    setError(null);
+    setSavedNote(null);
+    setFiledPdf(null);
+    startFile(async () => {
+      try {
+        const payload = Array.from(edits, ([id, edit]) => ({ id, ...edit }));
+        const notePayload = Array.from(noteEdits, ([id, text]) => ({ id, text }));
+        await saveReviewByToken(token, payload, notePayload, incomingEdit);
+        setSavedNote("Changes saved. Saving the PDF to OneDrive…");
+        const filed = await savePdfToOneDriveByToken(token);
+        setSavedNote(null);
+        setFiledPdf(filed);
+      } catch (e) {
+        setSavedNote(null);
+        setError(
+          e instanceof Error ? e.message : "Couldn't save the PDF to OneDrive.",
+        );
       }
     });
   }
@@ -265,6 +301,7 @@ export function ReviewEditor({
           onChange={(next) => {
             setIncomingEdit(next);
             setSavedNote(null);
+            setFiledPdf(null);
           }}
         />
       )}
@@ -460,10 +497,20 @@ export function ReviewEditor({
           <button
             type="button"
             onClick={save}
-            disabled={saving || sending}
+            disabled={busy}
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-black/[.12] bg-white px-5 text-sm font-semibold text-zinc-700 transition-colors hover:bg-black/[.04] disabled:opacity-60 dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-white/[.08]"
           >
             {saving ? "Saving…" : "Save changes"}
+          </button>
+
+          <button
+            type="button"
+            onClick={saveToOneDrive}
+            disabled={busy}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-black/[.12] bg-white px-5 text-sm font-semibold text-zinc-700 transition-colors hover:bg-black/[.04] disabled:opacity-60 dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-white/[.08]"
+          >
+            <CloudUpload className="h-4 w-4" aria-hidden="true" />
+            {filing ? "Saving to OneDrive…" : "Save PDF to OneDrive"}
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -472,7 +519,7 @@ export function ReviewEditor({
               onChange={(event) =>
                 setApprover(event.target.value as Approver)
               }
-              disabled={saving || sending}
+              disabled={busy}
               aria-label="Approval recipient"
               className="h-12 rounded-lg border border-black/[.12] bg-white px-3 text-sm font-semibold text-zinc-700 disabled:opacity-60 dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-300"
             >
@@ -482,7 +529,7 @@ export function ReviewEditor({
             <button
               type="button"
               onClick={sendForApproval}
-              disabled={saving || sending || !approversConfigured[approver]}
+              disabled={busy || !approversConfigured[approver]}
               className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#0072c6] px-5 text-sm font-semibold text-white shadow-sm shadow-[#0072c6]/20 transition-colors hover:bg-[#005ea2] disabled:opacity-60"
             >
               <Send className="h-4 w-4" aria-hidden="true" />
@@ -493,7 +540,9 @@ export function ReviewEditor({
           </div>
 
           <p className="ml-auto text-sm text-zinc-500">
-            Sending saves these edits first. You may be asked to sign in.
+            Saving the PDF files it into this property’s inspection folder — no
+            download needed. Sending saves these edits first and may ask you to
+            sign in.
           </p>
         </div>
         {!approversConfigured[approver] && (
@@ -507,6 +556,20 @@ export function ReviewEditor({
         {savedNote && (
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             {savedNote}
+          </p>
+        )}
+        {filedPdf && (
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+            Saved{" "}
+            <a
+              href={filedPdf.webUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="font-semibold text-[#0072c6] underline underline-offset-2 dark:text-sky-300"
+            >
+              {filedPdf.filename}
+            </a>{" "}
+            to this property’s inspection folder in OneDrive.
           </p>
         )}
       </div>

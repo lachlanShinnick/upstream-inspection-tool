@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { polishComment } from "@/lib/commentPolish";
-import { getGraphClient } from "@/lib/graph";
+import { getGraphClient, uploadFileToFolderAppOnly } from "@/lib/graph";
 import {
   INSPECTION_CONDITIONS,
   incomingDetailsToRow,
@@ -12,6 +12,7 @@ import {
   type InspectionCondition,
 } from "@/lib/incomingInspection";
 import { formatPropertyName } from "@/lib/propertyName";
+import { renderReportPdfAppOnly } from "@/lib/reportGeneration";
 import { reportTypeInfo } from "@/lib/reportTypes";
 import {
   APPROVER_LABEL,
@@ -121,6 +122,37 @@ export async function saveReviewByToken(
 
   revalidatePath(`/review/${token}`);
   return { saved: true };
+}
+
+/**
+ * File the report as a PDF straight into the property's OneDrive inspection
+ * folder — the same dated subfolder the generated .docx already lives in — so
+ * an approver working off a phone or away from the office doesn't have to
+ * download the PDF and re-upload it by hand.
+ *
+ * Rendered from the inspection's *current* saved content, like the reviewer's
+ * download route, and written by path, so re-filing after another round of
+ * edits overwrites the same PDF instead of piling up copies. The inspector's
+ * canonical .docx (generated_doc_onedrive_id) is left untouched.
+ */
+export async function savePdfToOneDriveByToken(
+  token: string,
+): Promise<{ filename: string; webUrl: string }> {
+  const scope = await validateReviewToken(token);
+  if (!scope) throw new Error("This review link has expired.");
+
+  const { pdf, inspection, baseName } = await renderReportPdfAppOnly(
+    scope.inspectionId,
+  );
+  const saved = await uploadFileToFolderAppOnly(
+    inspection.onedrive_drive_id,
+    inspection.onedrive_subfolder_id,
+    `${baseName}.pdf`,
+    pdf,
+    "application/pdf",
+  );
+
+  return { filename: saved.name, webUrl: saved.webUrl };
 }
 
 /**
