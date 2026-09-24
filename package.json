@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && serwist build serwist.config.mjs",
+    "build": "next build && node --test tests/sharp-tracing.test.mjs && serwist build serwist.config.mjs",
     "pwa:build": "serwist build serwist.config.mjs",
     "start": "next start",
     "lint": "eslint"
